@@ -98,6 +98,9 @@ describe('the shipped chat bundle', () => {
     // the pill must read the desktop bridge, never a raw endpoint
     expect(source).toContain('window.dshGlmQuota?.get')
     expect(source).not.toContain('api/monitor/usage/quota/limit')
+    // both surfaces share the gradient meter, and it shifts hue with usage
+    expect(source).toContain('function quotaMeter(')
+    expect(source).toContain('linear-gradient(90deg, hsl(')
   })
 })
 
