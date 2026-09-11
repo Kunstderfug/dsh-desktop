@@ -1,5 +1,6 @@
 import childProcess from 'node:child_process'
 import { syncBuiltinESMExports } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { enforceWindowsChildProcessHide } from './windows-child-process-hide.mjs'
 
 // On macOS Harness runs inside an Electron utility process (TCC responsibility
@@ -31,7 +32,7 @@ function reportPluginFailures(error) {
     visited.add(value)
     let nested = visit(value.cause)
     if (value instanceof AggregateError) {
-      for (const child of value.errors) nested = visit(child) || nested
+      for (const child of value.errors) nested = visit(child)
     }
     const failure = value.dshPluginFailure
     if (!nested && failure && typeof failure === 'object') {
@@ -46,11 +47,10 @@ function reportPluginFailures(error) {
   return failures.length > 0
 }
 
-// The entry runs as this process's real main module (see below), so a boot
-// failure surfaces here as an uncaught exception or unhandled rejection rather
-// than as a rejected import. Send the loader-owned identity first; when nothing
-// owns the failure keep the plain label. Either way the process must fail — an
-// uncaught exception cannot exit 0 merely because a handler is installed.
+// A boot failure surfaces as an uncaught exception or unhandled rejection, or
+// as the rejected import below. Send the loader-owned identity first; when
+// nothing owns the failure keep the plain label. Either way the process must
+// fail — an uncaught exception cannot exit 0 merely because a handler exists.
 function surfaceFailure(label, error) {
   const owned = reportPluginFailures(error)
   report(owned ? 'DSH entry failed' : label, error?.stack ?? error)
@@ -94,28 +94,12 @@ if (!dshEntryPath) {
   process.stdout.write(`[harness-node] loading=${dshEntryPath}\n`)
   process.argv = [process.execPath, dshEntryPath, ...dshArguments]
   try {
-<<<<<<< HEAD
-    // The entry must be this process's main module, not a module this file
-    // imported. Harness entries gate their own dispatch behind
-    // `import.meta.main` — `@deepseek-ai/dsh/lib/bin.js` does
-    // `if (import.meta.main) await runCli()`, and
-    // `dsh-subprocess-local/lib/runner.js` guards its body the same way — but
-    // Node reports `main` as false for any module reached through `import()`.
-    // Loading the entry that way therefore boots nothing at all: the CLI runs
-    // no command, the plugin tree is never composed, and the Harness exits 0
-    // with no server, no plugin tree, and no error for the desktop to surface.
-    // Node's own entry runner is the path `node <entry>` takes, so the entry
-    // gets real main-module status while this file keeps preloading first.
-    const { runMain } = await import('node:module')
-    await runMain()
-=======
     // Harness 0.1.5 gates its CLI behind `if (import.meta.main)` and exports
     // `runCli`. This file imports the entry rather than being it, so that guard
     // is false here and a plain import would load the module, run nothing, and
     // let the process exit 0 with no diagnostics. Call the export when the
     // entry offers one; older builds still self-execute on import.
     const entry = await import(pathToFileURL(dshEntryPath).href)
->>>>>>> upstream/v0.9.0
     process.stdout.write('[harness-node] DSH entry loaded\n')
     if (typeof entry.runCli === 'function') {
       process.stdout.write('[harness-node] invoking DSH runCli()\n')

@@ -1,5 +1,4 @@
-import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -285,44 +284,6 @@ describe('Harness launch contract', () => {
     expect(entry).toContain("process.env.ELECTRON_RUN_AS_NODE = '1'")
     expect(entry).toContain('entry.runCli')
   })
-
-  it('dispatches the Harness entry as the main module instead of importing it', async () => {
-    // Harness entries gate their own dispatch behind `import.meta.main`
-    // (`@deepseek-ai/dsh/lib/bin.js`: `if (import.meta.main) await runCli()`),
-    // and Node reports `main` as false for any module reached through
-    // `import()`. A preload that imported the CLI therefore booted nothing:
-    // no plugin tree, no server, exit code 0, and a desktop screen that could
-    // only say "Harness stopped unexpectedly".
-    const entry = await readFile(join(process.cwd(), 'build', 'harness-node-entry.mjs'), 'utf8')
-    expect(entry).toContain("const { runMain } = await import('node:module')")
-    expect(entry).toContain('await runMain()')
-    expect(entry).not.toContain('await import(pathToFileURL')
-
-    const home = await mkdtemp(join(tmpdir(), 'dsh-entry-main-'))
-    const probe = join(home, 'probe-entry.mjs')
-    await writeFile(
-      probe,
-      'process.stdout.write(`probe main=${String(import.meta.main)} argv=${process.argv.slice(2).join(",")}\\n`)\n'
-    )
-    const child = spawn(
-      process.execPath,
-      [join(process.cwd(), 'build', 'harness-node-entry.mjs'), probe, 'web', '--port', '43127'],
-      { stdio: ['ignore', 'pipe', 'pipe'] }
-    )
-    let output = ''
-    child.stdout.setEncoding('utf8')
-    child.stderr.setEncoding('utf8')
-    child.stdout.on('data', (chunk: string) => (output += chunk))
-    child.stderr.on('data', (chunk: string) => (output += chunk))
-    const exitCode = await new Promise<number | null>((resolve, reject) => {
-      child.once('error', reject)
-      child.once('close', resolve)
-    })
-    await rm(home, { recursive: true, force: true })
-
-    expect(output, output).toContain('probe main=true argv=web,--port,43127')
-    expect(exitCode).toBe(0)
-  }, 30_000)
 
   it('rejects an unexpected macOS Harness argument layout', () => {
     expect(() =>
