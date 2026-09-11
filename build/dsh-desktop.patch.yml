@@ -11,6 +11,20 @@
 - id: ui-brand-official
   disabled: true
 
+# `connection.rpc.handle(channel, …)` mounts one prefix route per channel on the
+# webserver, and it resolves `webServer` from the fiber that *provides*
+# `connection` — not from the plugin that registers the channel. The stock
+# web-app bundle injects only `webRuntime` there, so in 0.1.5 every
+# `rpc.handle` call aborts profile boot with `cannot get property "webServer"
+# without inject`. The shared `/api` channel is unaffected: `connection` mounts
+# that one itself under `ctx.inject(['webServer'])`. dsh-ppt registers its two
+# channels through `rpc.handle`, so the desktop overlay declares the dependency
+# the route registration needs.
+- id: connection
+  inject:
+    - webRuntime
+    - webServer
+
 - insert:
     - id: dsh-desktop-client-ui
       name: dsh-desktop-client-ui

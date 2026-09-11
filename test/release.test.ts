@@ -50,7 +50,7 @@ describe('GitHub release contract', () => {
     expect(peerOnlyRuntimePackages).toEqual([])
   })
 
-  it('vendors upstream-new closure packages as file: production deps with no registry resolution', async () => {
+  it('resolves closure packages from the npm registry instead of vendored tarballs', async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(projectRoot, 'package.json'), 'utf8')
     ) as { dependencies: Record<string, string> }
@@ -59,11 +59,14 @@ describe('GitHub release contract', () => {
       'utf8'
     )
     const packageLock = JSON.parse(packageLockRaw) as {
-      packages: Record<string, { resolved?: string }>
+      packages: Record<string, { resolved?: string; version?: string; link?: boolean }>
     }
 
-    // alpha.3 introduced these as transitive deps of shipped packages; they must
-    // resolve from the vendored tarballs, not registry.npmmirror.com.
+    // Upstream publishes the whole dsh family to npm, so the Desktop pins these
+    // by version. The vendored `packages/harness-*` tarball trees were a
+    // stopgap for the period when upstream shipped only GitHub tags, and the
+    // repo README declared they should be deleted once registry packages
+    // existed. `file:` production deps for Harness packages must not return.
     const promotedClosurePackages = [
       '@deepseek-ai/dsh-client-ui-schedule',
       '@deepseek-ai/dsh-deque',
@@ -73,18 +76,27 @@ describe('GitHub release contract', () => {
     ]
 
     for (const packageName of promotedClosurePackages) {
-      expect(packageJson.dependencies[packageName]).toMatch(
-        /^file:packages\/harness-0\.1\.2-rc\.1\/npm-dsh\/.+\.tgz$/
-      )
-      expect(packageLock.packages[`node_modules/${packageName}`]?.resolved).toMatch(
-        /^file:packages\/harness-0\.1\.2-rc\.1\/npm-dsh\//
-      )
+      expect(packageJson.dependencies[packageName]).toMatch(/^\d+\.\d+\.\d+/)
+      expect(packageJson.dependencies[packageName]).not.toMatch(/^file:/)
+      const entry = packageLock.packages[`node_modules/${packageName}`]
+      expect(entry?.version).toBe(packageJson.dependencies[packageName])
+      // npm may legitimately omit `resolved` for packages already present in the
+      // tree, so assert the anti-pattern instead: whatever is recorded must not
+      // point back at a local vendored tarball or a non-registry source.
+      if (entry?.resolved !== undefined) {
+        expect(entry.resolved).not.toMatch(/^file:/)
+        expect(entry.resolved).toMatch(/^https?:\/\/[^"]*registry\.npmjs\.org\//)
+      } else {
+        expect(entry?.link).not.toBe(true)
+      }
     }
 
-    // No @deepseek-ai/dsh-* package may resolve from a remote registry URL.
-    expect(packageLockRaw).not.toMatch(
-      /"resolved":\s*"https?:\/\/[^"]*deepseek-ai[/-]dsh/
-    )
+    // No Harness package may be pinned to a local vendored tarball any more.
+    const vendoredHarnessDeps = Object.entries(packageJson.dependencies)
+      .filter(([name, spec]) => name.startsWith('@deepseek-ai/') && spec.startsWith('file:'))
+      .map(([name]) => name)
+
+    expect(vendoredHarnessDeps).toEqual([])
   })
 
   it('does not promote optional Harness providers and test support into the desktop runtime', async () => {

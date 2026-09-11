@@ -1,6 +1,8 @@
+diff --git a/node_modules/@deepseek-ai/dsh-command-compact/lib/index.js b/node_modules/@deepseek-ai/dsh-command-compact/lib/index.js
+index 4399e52..a43dd83 100644
 --- a/node_modules/@deepseek-ai/dsh-command-compact/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-command-compact/lib/index.js
-@@ -13,12 +13,23 @@
+@@ -13,12 +13,23 @@ function assertNever(value) {
  	throw new TypeError(`unknown manual compaction error code: ${String(value)}`);
  }
  /* v8 ignore stop */
@@ -26,7 +28,7 @@
  		};
  		case "cancelled": return {
  			kind: "error",
-@@ -97,4 +108,4 @@
+@@ -97,4 +108,4 @@ function apply(ctx) {
  	}, "command-compact lifecycle");
  }
  //#endregion

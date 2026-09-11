@@ -17,6 +17,18 @@ const SEAT_LABEL = 'color:var(--dsw-alias-label-primary)'
 
 /* cSpell:ignore MYBq */
 
+/**
+ * The CSS-module hash salt is regenerated on every upstream build, so it is read
+ * from the installed bundle rather than pinned. Upstream 0.1.5-rc.2 renamed the
+ * module that carries it (the previous salt was `YgMYBq`), which is exactly the
+ * kind of churn that should not require editing this file.
+ */
+function saltOf(client: string): string {
+  const match = client.match(/\.([A-Za-z0-9_-]+)_item\{box-sizing:border-box/u)
+  if (match?.[1] === undefined) throw new Error('no preset-item rule in the bundle')
+  return match[1]
+}
+
 /** Parse a `#rrggbb` or `#rrggbbaa` literal into channels plus alpha. */
 function color(literal: string): { rgb: [number, number, number]; alpha: number } {
   const hex = literal.replace('#', '')
@@ -92,8 +104,9 @@ describe('DSH Desktop agent-preset chip', () => {
   it('keeps the ring on the trigger only, never on the popup rows', async () => {
     const client = await readFile(agentPresetClient, 'utf8')
 
-    expect(client).toContain('.YgMYBq_item{box-sizing:border-box')
-    expect(client).toContain('.YgMYBq_selectedItem{background:#4d6bfe12}')
+    const salt = saltOf(client)
+    expect(client).toContain(`.${salt}_item{box-sizing:border-box`)
+    expect(client).toContain(`.${salt}_selectedItem{background:#4d6bfe12}`)
   })
 
   it('carries the ring in the reproducible dependency patch', async () => {
@@ -119,7 +132,7 @@ describe('DSH Desktop preset menu footer contrast', () => {
 
     /**
      * Read the body of the first rule for one selector. The reduced-motion block
-     * restates `.YgMYBq_awesome` with `transition:none` and no colour, so the
+     * restates the `_awesome` rule with `transition:none` and no colour, so the
      * painted base rule is the one that declares a transition duration.
      */
     const body = (selector: string, painted = false): string => {
@@ -135,10 +148,10 @@ describe('DSH Desktop preset menu footer contrast', () => {
     }
 
     return {
-      base: body('.YgMYBq_awesome', true),
-      hover: body('.YgMYBq_awesome:hover'),
-      dark: body('body[data-ds-dark-theme] .YgMYBq_awesome'),
-      darkHover: body('body[data-ds-dark-theme] .YgMYBq_awesome:hover')
+      base: body(`.${saltOf(client)}_awesome`, true),
+      hover: body(`.${saltOf(client)}_awesome:hover`),
+      dark: body(`body[data-ds-dark-theme] .${saltOf(client)}_awesome`),
+      darkHover: body(`body[data-ds-dark-theme] .${saltOf(client)}_awesome:hover`)
     }
   }
 
@@ -183,15 +196,15 @@ describe('DSH Desktop preset menu footer contrast', () => {
 
     // The app never declares `color-scheme`, so `light-dark()` would silently
     // resolve to its light branch in the dark theme.
-    expect(client).toContain('body[data-ds-dark-theme] .YgMYBq_awesome{color:')
+    expect(client).toContain(`body[data-ds-dark-theme] .${saltOf(client)}_awesome{color:`)
     expect(client).not.toContain('light-dark(')
   })
 
   it('carries the per-mode blues in the reproducible dependency patch', async () => {
     const patch = await readFile(patchPath('@deepseek-ai/dsh-client-ui-agent-preset'), 'utf8')
 
-    expect(patch).toContain('body[data-ds-dark-theme] .YgMYBq_awesome{color:#679efe')
-    expect(patch).toContain('.YgMYBq_awesome{box-sizing:border-box;width:336px;color:#3a58c4')
+    expect(patch).toContain(`body[data-ds-dark-theme] .${saltOf(patch)}_awesome{color:#679efe`)
+    expect(patch).toContain(`.${saltOf(patch)}_awesome{box-sizing:border-box;width:336px;color:#3a58c4`)
     expect(patch).not.toContain('#3154df')
   })
 })

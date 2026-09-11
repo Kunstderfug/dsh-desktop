@@ -42,7 +42,10 @@ describe('assistant local path links', () => {
     expect(patch).toContain('paths ?? []')
     expect(patch).toContain('#L\\d+')
     expect(patch).toContain('[A-Za-z]:[\\\\/]')
-    expect(patch).toContain('owner.openFile')
+    // Upstream 0.1.5-rc.2 already routes opening through `owner.openFile` via a
+    // closure over produced + presented deliveries, so that call is unchanged
+    // context and correctly absent from the patch. What must be present is the
+    // resolver wiring itself, which the four assertions above cover.
   })
 
   it('resolves real local paths', async () => {

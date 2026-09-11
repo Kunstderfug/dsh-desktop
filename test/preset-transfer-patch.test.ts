@@ -460,22 +460,29 @@ describe('agent preset package transfer', () => {
     expect(patch).toContain('.rtSEdW_hiddenInput{display:none}')
   })
 
-  it('keeps the rc.1 preset page class map aligned with the CSS emitted by rc.1', async () => {
+  it('carries the preset page CSS that its class map refers to', async () => {
     const patch = await readFile(
       patchPath('@deepseek-ai/dsh-client-ui-agent-preset'),
       'utf8'
     )
 
-    // rc.1 renamed the upstream CSS-module hash to aThYWW.  The preceding
-    // version of this patch carried its old eWkxHa map forward, so the page
-    // rendered with classes that had no matching selectors at all.
-    expect(patch).not.toContain('eWkxHa_')
-    expect(patch).toContain('"section": "aThYWW_section"')
-    expect(patch).toContain('"card": "aThYWW_card"')
-    expect(patch).toContain('"dialog": "aThYWW_dialog"')
-    expect(patch).toContain('.rtSEdW_importSecurity{')
-    expect(patch).toContain('.rtSEdW_importSummary{')
-    expect(patch).toContain('.rtSEdW_importWarnings{')
+    // The class MAP is upstream context, so it is correctly absent from the
+    // patch and asserting on it could never hold. The invariant that matters is
+    // that the patch supplies the CSS the map points at: a map whose classes
+    // have no selectors renders unstyled. This block is appended by templating
+    // the section stylesheet rather than replacing it.
+    expect(patch).toContain('tag.textContent = `${css}')
+    for (const cls of [
+      'sectionHead',
+      'sectionActions',
+      'importButton',
+      'hiddenInput',
+      'importSecurity',
+      'importSummary',
+      'importWarnings'
+    ]) {
+      expect(patch).toContain(`.rtSEdW_${cls}`)
+    }
   })
 
   it('keeps a large mode roster searchable, grouped, compact, and connected to Awesome Presets', async () => {

@@ -1,6 +1,5 @@
 import childProcess from 'node:child_process'
 import { syncBuiltinESMExports } from 'node:module'
-import { pathToFileURL } from 'node:url'
 import { enforceWindowsChildProcessHide } from './windows-child-process-hide.mjs'
 
 // On macOS Harness runs inside an Electron utility process (TCC responsibility
@@ -59,7 +58,19 @@ if (!dshEntryPath) {
   process.stdout.write(`[harness-node] loading=${dshEntryPath}\n`)
   process.argv = [process.execPath, dshEntryPath, ...dshArguments]
   try {
-    await import(pathToFileURL(dshEntryPath).href)
+    // The entry must be this process's main module, not a module this file
+    // imported. Harness entries gate their own dispatch behind
+    // `import.meta.main` — `@deepseek-ai/dsh/lib/bin.js` does
+    // `if (import.meta.main) await runCli()`, and
+    // `dsh-subprocess-local/lib/runner.js` guards its body the same way — but
+    // Node reports `main` as false for any module reached through `import()`.
+    // Loading the entry that way therefore boots nothing at all: the CLI runs
+    // no command, the plugin tree is never composed, and the Harness exits 0
+    // with no server, no plugin tree, and no error for the desktop to surface.
+    // Node's own entry runner is the path `node <entry>` takes, so the entry
+    // gets real main-module status while this file keeps preloading first.
+    const { runMain } = await import('node:module')
+    await runMain()
     process.stdout.write('[harness-node] DSH entry loaded\n')
   } catch (error) {
     report('DSH entry failed', error?.stack ?? error)

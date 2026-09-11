@@ -1,7 +1,139 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js
+index 209a74d..1de4e93 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js
-@@ -397,15 +397,71 @@
+@@ -90,6 +90,44 @@ window.__ModuleLoader__.load({
+ 		};
+ 		//#endregion
+ 		//#region lib/types/client/directory.js
++		/**
++		* Whether the catalog still serves one exact provider and model.
++		*
++		* A Session's selection is durable and a catalog is not: Settings edits add,
++		* rename, and remove models beneath a selection that was made earlier. A
++		* selection naming a model the catalog no longer lists cannot be rendered
++		* with a name at all.
++		* @param selection - provider and model to look up.
++		* @param catalog - loaded catalog value carrying the provider groups.
++		* @returns true while the catalog lists that provider and model.
++		*/
++		function catalogServes(selection, catalog) {
++			if (selection === null || selection === void 0) return false;
++			return catalog.groups.some((group) => group.id === selection.provider && group.models.some((model) => model.id === selection.model));
++		}
++		/**
++		* Pick the selection that replaces one the catalog no longer serves.
++		*
++		* The deployment default leads — it is the model a new Session would get —
++		* and the served models follow in catalog order, so a default that went
++		* stale in the same edit still resolves to something real. Only routable
++		* providers are offered once any are known, because a replacement the Host
++		* refuses would leave the Session on the same unusable model.
++		* @param current - the selection the catalog no longer serves.
++		* @param catalog - loaded catalog value carrying the default and the groups.
++		* @returns the replacement selection, or undefined when the catalog serves none.
++		*/
++		function replacementSelection(current, catalog) {
++			const served = catalog.groups.flatMap((group) => group.models.map((model) => ({
++				provider: group.id,
++				model: model.id
++			})));
++			const routable = served.filter((candidate) => catalog.routableProviders.includes(candidate.provider));
++			const allowed = routable.length === 0 ? served : routable;
++			const fallback = [catalog.default].filter((candidate) => allowed.includes(candidate));
++			const candidates = [...fallback, ...allowed];
++			return candidates.find((candidate) => candidate.provider !== current.provider || candidate.model !== current.model);
++		}
+ 		/** One session's shared directory controller; disposed with the session scope. */
+ 		var ModelDirectory = class {
+ 			sessions;
+@@ -110,6 +148,10 @@ window.__ModuleLoader__.load({
+ 			generation = 0;
+ 			disposed = false;
+ 			resolved = false;
++			/** Catalog revision already reconciled against the current selection. */
++			reconciledCatalog = "";
++			/** In-flight replacement selection for a model the user removed in Settings. */
++			adopting = false;
+ 			unsubscribeCatalog;
+ 			unsubscribeSelection;
+ 			/**
+@@ -191,6 +233,54 @@ window.__ModuleLoader__.load({
+ 				});
+ 				this.syncInputs();
+ 			}
++			/**
++			* Whether one selection still names a model the current catalog serves.
++			* Settings edits remove and rename models, so a selection that was valid
++			* when it was made can outlive the model it names.
++			* @param selection - provider and model to look up.
++			* @returns true while the catalog lists that exact provider and model.
++			*/
++			serves(selection) {
++				const catalog = this.catalog.store.getSnapshot();
++				if (catalog.status !== "ready" || catalog.value === null) return true;
++				return catalogServes(selection, catalog.value);
++			}
++			/** Identity of the catalog value this directory has already reconciled against. */
++			catalogFingerprint() {
++				const catalog = this.catalog.store.getSnapshot();
++				if (catalog.status !== "ready" || catalog.value === null) return "";
++				return catalog.value.groups.map((group) => `${group.id}/${group.models.map((model) => model.id).join(",")}`).join("|");
++			}
++			/**
++			* Follow the deployment default when the model a Session pins disappears.
++			*
++			* Removing a model in Settings leaves that Session's durable selection
++			* naming a model the Host no longer serves. The composer would render the
++			* bare "provider/model" identifier — a name that looks like the previously
++			* selected model because it literally is it, with nothing able to resolve
++			* it. Follow the deployment default instead, and fall back to the first
++			* served model when that default went stale in the same edit. The
++			* replacement is recorded as a normal selection so the Session and the
++			* deployment default both stop naming a model that no longer exists.
++			*
++			* One attempt per catalog value keeps a rejected replacement from looping.
++			* @param current - the selection the catalog no longer serves.
++			* @param catalog - the loaded catalog carrying the default and the groups.
++			* @returns the replacement selection, or undefined when nothing is served.
++			*/
++			followDefault(current, catalog) {
++				const resolved = replacementSelection(current, catalog);
++				if (resolved === undefined) return void 0;
++				this.adopting = true;
++				this.select({
++					provider: resolved.provider,
++					model: resolved.model,
++					...resolved.reasoningEffort === void 0 ? {} : { reasoningEffort: resolved.reasoningEffort }
++				}).catch(() => {}).finally(() => {
++					this.adopting = false;
++				});
++				return resolved;
++			}
+ 			/** Scope teardown: late settlements lose write access to the store. */
+ 			dispose() {
+ 				this.disposed = true;
+@@ -222,7 +312,18 @@ window.__ModuleLoader__.load({
+ 					});
+ 					return;
+ 				}
+-				const current = projected.next ?? catalog.value.default;
++				const pinned = projected.next ?? catalog.value.default;
++				const fingerprint = this.catalogFingerprint();
++				if (this.adopting) return;
++				const stale = !this.serves(pinned);
++				if (!stale) this.reconciledCatalog = fingerprint;
++				let current = pinned;
++				if (stale && this.reconciledCatalog !== fingerprint) {
++					// Mark first: the replacement's own settlement re-enters here and
++					// must not start a second attempt for the same catalog value.
++					this.reconciledCatalog = fingerprint;
++					current = this.followDefault(pinned, catalog.value) ?? pinned;
++				}
+ 				this.resolved = true;
+ 				this.store.set({
+ 					current,
+@@ -405,15 +506,71 @@ window.__ModuleLoader__.load({
  		* store/verbs) + the standard locale seat.
  		* @returns the trigger and, while open, the two-level menu.
  		*/
@@ -70,10 +202,10 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.
  			const rootRef = (0, react.useRef)(null);
  			const triggerRef = (0, react.useRef)(null);
 +			const searchRef = (0, react.useRef)(null);
+ 			const menuRef = (0, react.useRef)(null);
+ 			const [menuPos, setMenuPos] = (0, react.useState)(null);
  			const itemRefs = (0, react.useRef)([]);
- 			const id = (0, react.useId)();
- 			const choices = (0, react.useMemo)(() => state.groups.flatMap((group) => group.models.map((model) => ({
-@@ -417,6 +473,7 @@
+@@ -427,6 +584,7 @@ window.__ModuleLoader__.load({
  					...model.reasoning?.defaultEffort === void 0 ? {} : { reasoningEffort: model.reasoning.defaultEffort }
  				}
  			}))), [state.groups]);
@@ -81,10 +213,10 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.
  			const currentChoice = choices[state.current === null ? -1 : choices.findIndex((c) => c.selection.provider === state.current?.provider && c.selection.model === state.current.model)];
  			const reasoning = currentChoice?.model.reasoning;
  			const effectiveEffort = state.current?.reasoningEffort ?? reasoning?.defaultEffort;
-@@ -445,15 +502,20 @@
- 					document.removeEventListener("mousedown", closeOutside);
- 				};
- 			}, [open]);
+@@ -490,15 +648,20 @@ window.__ModuleLoader__.load({
+ 				pane,
+ 				state
+ 			]);
 +			(0, react.useEffect)(() => {
 +				if (open && pane === "model") searchRef.current?.focus();
 +			}, [open, pane]);
@@ -102,7 +234,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.
  				if (restoreFocus) queueMicrotask(() => {
  					triggerRef.current?.focus();
  				});
-@@ -462,12 +524,16 @@
+@@ -507,12 +670,16 @@ window.__ModuleLoader__.load({
  				const items = itemRefs.current.filter((item) => item !== null);
  				if (items.length === 0) return;
  				const active = items.findIndex((item) => item === document.activeElement);
@@ -121,7 +253,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.
  					else close(true);
  					return;
  				}
-@@ -577,6 +643,7 @@
+@@ -628,6 +795,7 @@ window.__ModuleLoader__.load({
  								role: "menuitem",
  								className: ModelSelect_module_css_default.cell,
  								onClick: () => {
@@ -129,7 +261,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.
  									setPane("model");
  								},
  								children: [
-@@ -611,6 +678,23 @@
+@@ -662,6 +830,23 @@ window.__ModuleLoader__.load({
  								]
  							})] }),
  							pane === "model" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
@@ -153,7 +285,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.
  								state.status === "loading" && (0, react_jsx_runtime.jsx)("div", {
  									className: ModelSelect_module_css_default.status,
  									children: t("status.loading")
-@@ -638,7 +722,7 @@
+@@ -689,7 +874,7 @@ window.__ModuleLoader__.load({
  								}, failure.id)),
  								(0, react_jsx_runtime.jsx)("div", {
  									className: clsx(ModelSelect_module_css_default.groups, "scrollable"),
@@ -162,7 +294,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.
  										const headingId = `${id}-${group.id}`;
  										return (0, react_jsx_runtime.jsxs)("section", {
  											role: "group",
-@@ -682,6 +766,10 @@
+@@ -733,6 +918,10 @@ window.__ModuleLoader__.load({
  								state.status === "ready" && choices.length === 0 && (0, react_jsx_runtime.jsx)("div", {
  									className: ModelSelect_module_css_default.empty,
  									children: t("empty.models")
@@ -173,7 +305,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.
  								})
  							] }),
  							pane === "effort" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [state.error !== null && lastActionRef.current === "load" && (0, react_jsx_runtime.jsxs)("div", {
-@@ -752,12 +840,15 @@
+@@ -805,12 +994,15 @@ window.__ModuleLoader__.load({
  			"menu.aria": "模型与推理等级",
  			"menu.model": "模型",
  			"menu.effort": "推理等级",
@@ -189,7 +321,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.
  			"blocked.composer": "当前模型不可用，请先选择模型",
  			"empty.efforts": "当前模型未提供推理等级。"
  		};
-@@ -773,12 +864,15 @@
+@@ -828,12 +1020,15 @@ window.__ModuleLoader__.load({
  			"menu.aria": "Model and reasoning effort",
  			"menu.model": "Model",
  			"menu.effort": "Effort",
@@ -205,140 +337,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.
  			"blocked.composer": "This model is unavailable — select one to continue",
  			"empty.efforts": "This model provides no reasoning effort levels."
  		};
---- a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js
-+++ b/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js
-@@ -89,6 +89,44 @@
- 		};
- 		//#endregion
- 		//#region lib/types/client/directory.js
-+		/**
-+		* Whether the catalog still serves one exact provider and model.
-+		*
-+		* A Session's selection is durable and a catalog is not: Settings edits add,
-+		* rename, and remove models beneath a selection that was made earlier. A
-+		* selection naming a model the catalog no longer lists cannot be rendered
-+		* with a name at all.
-+		* @param selection - provider and model to look up.
-+		* @param catalog - loaded catalog value carrying the provider groups.
-+		* @returns true while the catalog lists that provider and model.
-+		*/
-+		function catalogServes(selection, catalog) {
-+			if (selection === null || selection === void 0) return false;
-+			return catalog.groups.some((group) => group.id === selection.provider && group.models.some((model) => model.id === selection.model));
-+		}
-+		/**
-+		* Pick the selection that replaces one the catalog no longer serves.
-+		*
-+		* The deployment default leads — it is the model a new Session would get —
-+		* and the served models follow in catalog order, so a default that went
-+		* stale in the same edit still resolves to something real. Only routable
-+		* providers are offered once any are known, because a replacement the Host
-+		* refuses would leave the Session on the same unusable model.
-+		* @param current - the selection the catalog no longer serves.
-+		* @param catalog - loaded catalog value carrying the default and the groups.
-+		* @returns the replacement selection, or undefined when the catalog serves none.
-+		*/
-+		function replacementSelection(current, catalog) {
-+			const served = catalog.groups.flatMap((group) => group.models.map((model) => ({
-+				provider: group.id,
-+				model: model.id
-+			})));
-+			const routable = served.filter((candidate) => catalog.routableProviders.includes(candidate.provider));
-+			const allowed = routable.length === 0 ? served : routable;
-+			const fallback = [catalog.default].filter((candidate) => allowed.includes(candidate));
-+			const candidates = [...fallback, ...allowed];
-+			return candidates.find((candidate) => candidate.provider !== current.provider || candidate.model !== current.model);
-+		}
- 		/** One session's shared directory controller; disposed with the session scope. */
- 		var ModelDirectory = class {
- 			sessions;
-@@ -109,6 +147,10 @@
- 			generation = 0;
- 			disposed = false;
- 			resolved = false;
-+			/** Catalog revision already reconciled against the current selection. */
-+			reconciledCatalog = "";
-+			/** In-flight replacement selection for a model the user removed in Settings. */
-+			adopting = false;
- 			unsubscribeCatalog;
- 			unsubscribeSelection;
- 			/**
-@@ -190,6 +232,54 @@
- 				});
- 				this.syncInputs();
- 			}
-+			/**
-+			* Whether one selection still names a model the current catalog serves.
-+			* Settings edits remove and rename models, so a selection that was valid
-+			* when it was made can outlive the model it names.
-+			* @param selection - provider and model to look up.
-+			* @returns true while the catalog lists that exact provider and model.
-+			*/
-+			serves(selection) {
-+				const catalog = this.catalog.store.getSnapshot();
-+				if (catalog.status !== "ready" || catalog.value === null) return true;
-+				return catalogServes(selection, catalog.value);
-+			}
-+			/** Identity of the catalog value this directory has already reconciled against. */
-+			catalogFingerprint() {
-+				const catalog = this.catalog.store.getSnapshot();
-+				if (catalog.status !== "ready" || catalog.value === null) return "";
-+				return catalog.value.groups.map((group) => `${group.id}/${group.models.map((model) => model.id).join(",")}`).join("|");
-+			}
-+			/**
-+			* Follow the deployment default when the model a Session pins disappears.
-+			*
-+			* Removing a model in Settings leaves that Session's durable selection
-+			* naming a model the Host no longer serves. The composer would render the
-+			* bare "provider/model" identifier — a name that looks like the previously
-+			* selected model because it literally is it, with nothing able to resolve
-+			* it. Follow the deployment default instead, and fall back to the first
-+			* served model when that default went stale in the same edit. The
-+			* replacement is recorded as a normal selection so the Session and the
-+			* deployment default both stop naming a model that no longer exists.
-+			*
-+			* One attempt per catalog value keeps a rejected replacement from looping.
-+			* @param current - the selection the catalog no longer serves.
-+			* @param catalog - the loaded catalog carrying the default and the groups.
-+			* @returns the replacement selection, or undefined when nothing is served.
-+			*/
-+			followDefault(current, catalog) {
-+				const resolved = replacementSelection(current, catalog);
-+				if (resolved === undefined) return void 0;
-+				this.adopting = true;
-+				this.select({
-+					provider: resolved.provider,
-+					model: resolved.model,
-+					...resolved.reasoningEffort === void 0 ? {} : { reasoningEffort: resolved.reasoningEffort }
-+				}).catch(() => {}).finally(() => {
-+					this.adopting = false;
-+				});
-+				return resolved;
-+			}
- 			/** Scope teardown: late settlements lose write access to the store. */
- 			dispose() {
- 				this.disposed = true;
-@@ -221,7 +311,18 @@
- 					});
- 					return;
- 				}
--				const current = projected.next ?? catalog.value.default;
-+				const pinned = projected.next ?? catalog.value.default;
-+				const fingerprint = this.catalogFingerprint();
-+				if (this.adopting) return;
-+				const stale = !this.serves(pinned);
-+				if (!stale) this.reconciledCatalog = fingerprint;
-+				let current = pinned;
-+				if (stale && this.reconciledCatalog !== fingerprint) {
-+					// Mark first: the replacement's own settlement re-enters here and
-+					// must not start a second attempt for the same catalog value.
-+					this.reconciledCatalog = fingerprint;
-+					current = this.followDefault(pinned, catalog.value) ?? pinned;
-+				}
- 				this.resolved = true;
- 				this.store.set({
- 					current,
-@@ -989,7 +1090,9 @@
+@@ -961,7 +1156,9 @@ window.__ModuleLoader__.load({
  		exports.ModelDirectory = ModelDirectory;
  		exports.ModelDirectoryResolver = ModelDirectoryResolver;
  		exports.apply = apply;
