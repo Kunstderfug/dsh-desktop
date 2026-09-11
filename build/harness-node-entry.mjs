@@ -43,10 +43,22 @@ function reportPluginFailures(error) {
   }
   visit(error)
   if (failures.length) report('plugin failures', JSON.stringify({ version: 1, failures }))
+  return failures.length > 0
 }
 
-process.on('uncaughtException', (error) => report('uncaught exception', error?.stack ?? error))
-process.on('unhandledRejection', (error) => report('unhandled rejection', error?.stack ?? error))
+// The entry runs as this process's real main module (see below), so a boot
+// failure surfaces here as an uncaught exception or unhandled rejection rather
+// than as a rejected import. Send the loader-owned identity first; when nothing
+// owns the failure keep the plain label. Either way the process must fail — an
+// uncaught exception cannot exit 0 merely because a handler is installed.
+function surfaceFailure(label, error) {
+  const owned = reportPluginFailures(error)
+  report(owned ? 'DSH entry failed' : label, error?.stack ?? error)
+  process.exitCode = 1
+}
+
+process.on('uncaughtException', (error) => surfaceFailure('uncaught exception', error))
+process.on('unhandledRejection', (error) => surfaceFailure('unhandled rejection', error))
 
 process.stdout.write(
   `[harness-node] runtime node=${process.version} platform=${process.platform} arch=${process.arch}\n`
@@ -97,8 +109,6 @@ if (!dshEntryPath) {
     await runMain()
     process.stdout.write('[harness-node] DSH entry loaded\n')
   } catch (error) {
-    reportPluginFailures(error)
-    report('DSH entry failed', error?.stack ?? error)
-    process.exitCode = 1
+    surfaceFailure('DSH entry failed', error)
   }
 }
