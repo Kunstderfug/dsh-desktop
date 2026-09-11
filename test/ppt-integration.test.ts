@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { gunzipSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
-import { projectRoot } from './patch-path'
+import { patchPath, projectRoot } from './patch-path'
 
 const artifacts = JSON.parse(await readFile(path.join(projectRoot, 'packages/ppt-runtime/artifacts.json'), 'utf8')) as Record<'core' | 'adapter', { file: string; sha256: string }>
 
@@ -185,11 +185,12 @@ describe('DSH PPT built-in plugin', () => {
   })
 
   it('integrates hero mode actions with the adjacent agent-preset control style', async () => {
-    const patch = await readFile(path.join(
-      projectRoot,
-      'patches',
-      '@deepseek-ai+dsh-client-ui-conversation+0.1.2-rc.1.patch'
-    ), 'utf8')
+    // Resolve by package name: the patch filename carries the Harness version it
+    // was captured against and is regenerated on every upgrade.
+    const patch = await readFile(
+      patchPath('@deepseek-ai/dsh-client-ui-conversation'),
+      'utf8'
+    )
 
     expect(patch).toContain(
       '[data-slot=conversation\\\\.hero\\\\.agentPreset]>span{width:max-content!important;min-width:0!important',
@@ -240,5 +241,22 @@ describe('DSH PPT built-in plugin', () => {
     expect(profilePatch).not.toContain('office-ppt-standard-adapter')
     expect(profilePatch).not.toContain('name: dsh-ppt')
     expect(profilePatch).not.toContain('workbuddy')
+  })
+
+  it('declares the webserver dependency that PPT channel registration resolves', async () => {
+    // `connection.rpc.handle(channel, …)` — what dsh-ppt calls for /dsh-ppt and
+    // /kimi-ppt — mounts one prefix route per channel on the webserver, and it
+    // reads `webServer` from the fiber that *provides* `connection` rather than
+    // from the plugin registering the channel. The stock web-app bundle injects
+    // only `webRuntime` there, so without this row every 0.1.5 profile boot
+    // aborts with `cannot get property "webServer" without inject`. The shared
+    // /api channel keeps working either way: `connection` mounts that itself
+    // under its own `ctx.inject(['webServer'])`.
+    const profilePatch = await readFile(
+      path.join(projectRoot, 'build', 'dsh-desktop.patch.yml'),
+      'utf8'
+    )
+
+    expect(profilePatch).toMatch(/- id: connection\n  inject:\n    - webRuntime\n    - webServer\n/)
   })
 })

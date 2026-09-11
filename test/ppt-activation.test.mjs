@@ -23,7 +23,10 @@ async function fixture(existingRoot) {
   const root = existingRoot ?? await mkdtemp(path.join(os.tmpdir(), 'dsh-ppt-activation-'))
   if (!existingRoot) cleanups.push(() => rm(root, { recursive: true, force: true }))
   const ctx = new Context()
-  const prompt = ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, persona: 'Default persona.' })
+  const prompt = // Harness 0.1.5-rc.2 replaced the `persona` option with `personaPrefix` /
+  // `personaSuffix`, registered as the `deployment:persona-prefix` and
+  // `deployment:persona-suffix` sections.
+  ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, personaPrefix: 'Default persona.' })
   await prompt
   cleanups.push(() => prompt.dispose())
   const skills = ctx.plugin(SkillRegistry)
@@ -56,7 +59,9 @@ async function fixture(existingRoot) {
     await scope.ctx.plugin({
       inject: ['systemPrompt'],
       apply(c) {
-        c.systemPrompt.section({ name: 'deployment:persona', order: 0, text: 'My custom preset.', complete })
+        // The deployment persona section was renamed in 0.1.5-rc.2; a scoped
+        // section shadows the global one only when the names match.
+        c.systemPrompt.section({ name: 'deployment:persona-prefix', order: 0, text: 'My custom preset.', complete })
       }
     })
     return instance
