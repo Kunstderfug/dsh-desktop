@@ -360,6 +360,13 @@ contextBridge.exposeInMainWorld(
 )
 
 contextBridge.exposeInMainWorld(
+  'dshGlmQuota',
+  Object.freeze({
+    get: (): Promise<unknown> => ipcRenderer.invoke('glm-quota:get')
+  })
+)
+
+contextBridge.exposeInMainWorld(
   'dshRecovery',
   Object.freeze({
     action: (action: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('recovery:action', action)

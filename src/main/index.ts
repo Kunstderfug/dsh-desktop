@@ -124,6 +124,7 @@ import {
   stopUpdateManager
 } from './update/update-manager'
 import type { RuntimeSnapshot } from '../shared/contracts'
+import { registerGlmQuotaIpc } from './glm-quota'
 import { resolveHarnessLocale } from './application-locale'
 import { installContextMenu } from './context-menu'
 import {
@@ -2682,6 +2683,7 @@ async function bootstrap(): Promise<void> {
   if (process.platform === 'darwin') app.dock?.setIcon(desktopIconPath())
   launchDirectory = await ensureLaunchRoot(app.getPath('userData'))
   registerUpdateHandlers()
+  registerGlmQuotaIpc()
   nativeTheme.themeSource = harnessThemePreference()
   ensureTray()
   const dshHome = join(app.getPath('userData'), 'harness')
