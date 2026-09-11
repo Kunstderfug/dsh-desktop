@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop",
-  "version": "0.1.1",
+  "version": "0.8.1",
   "description": "A cross-platform desktop shell for DeepSeek Harness.",
   "private": true,
   "type": "module",
@@ -424,5 +424,15 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     }
+  },
+  "allowScripts": {
+    "electron-winstaller": true,
+    "esbuild": true,
+    "koffi": true,
+    "node": true,
+    "node-pty": true,
+    "protobufjs": true,
+    "@deepseek-ai/dsh-subprocess-local": true,
+    "@google/genai": true
   }
 }
