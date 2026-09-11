@@ -283,6 +283,7 @@ describe('Harness launch contract', () => {
     const entry = await readFile(join(process.cwd(), 'build', 'harness-node-entry.mjs'), 'utf8')
     expect(entry).toContain('process.versions.electron !== undefined')
     expect(entry).toContain("process.env.ELECTRON_RUN_AS_NODE = '1'")
+    expect(entry).toContain('entry.runCli')
   })
 
   it('dispatches the Harness entry as the main module instead of importing it', async () => {

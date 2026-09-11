@@ -818,6 +818,7 @@ index aa8ef80..77a53c2 100644
  			onboardingSaving: "保存中…",
  			keyRequired: "请输入 API 密钥后继续。"
  		};
+<<<<<<< HEAD
 @@ -2971,4 +3335,4 @@ window.__ModuleLoader__.load({
  	}
  });
@@ -825,3 +826,5 @@ index aa8ef80..77a53c2 100644
 -//# sourceMappingURL=client.js.map
 \ No newline at end of file
 +//# sourceMappingURL=client.js.map
+=======
+>>>>>>> upstream/v0.9.0

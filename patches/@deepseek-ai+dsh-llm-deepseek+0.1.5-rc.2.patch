@@ -1,8 +1,15 @@
 diff --git a/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js b/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js
+<<<<<<< HEAD
 index eff6f1c..c0971f7 100644
 --- a/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js
 @@ -1524,7 +1524,6 @@ function requestId(headers) {
+=======
+index 8c86237..4978340 100644
+--- a/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js
+@@ -1509,7 +1509,6 @@ function requestId(headers) {
+>>>>>>> upstream/v0.9.0
  * @returns the normalized harness error code.
  */
  function httpErrorCode(status, error) {
@@ -10,7 +17,11 @@ index eff6f1c..c0971f7 100644
  	if (status === 413) return "INVALID_REQUEST";
  	const detail = [
  		error?.code,
+<<<<<<< HEAD
 @@ -1532,6 +1531,8 @@ function httpErrorCode(status, error) {
+=======
+@@ -1517,6 +1516,8 @@ function httpErrorCode(status, error) {
+>>>>>>> upstream/v0.9.0
  		error?.message
  	].filter(Boolean).join(" ");
  	if (isQuotaExceededError(detail)) return QUOTA_EXCEEDED_CODE;
@@ -19,6 +30,7 @@ index eff6f1c..c0971f7 100644
  	if (status === 429) return "RATE_LIMIT";
  	if (status === 400) {
  		if (isContextWindowExceededError(detail)) return CONTEXT_WINDOW_EXCEEDED_CODE;
+<<<<<<< HEAD
 diff --git a/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js.orig b/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js.orig
 new file mode 100644
 index 0000000..eff6f1c
@@ -2114,3 +2126,5 @@ index 0000000..eff6f1c
 +}
 +//#endregion
 +export { Config, DEFAULT_CONTEXT_WINDOW, DEFAULT_FILES_API_TIMEOUT_MS, DEFAULT_FILE_EXPIRY_SECONDS, DEFAULT_FILE_QUOTA_CLEANUP_BATCH, DEFAULT_FILE_REFRESH_MARGIN_SECONDS, DEFAULT_IMAGE_OFFLOAD_BYTE_QUANTUM, DEFAULT_IMAGE_OFFLOAD_COUNT_QUANTUM, DEFAULT_INLINE_IMAGE_OFFLOAD_BYTE_QUANTUM, DEFAULT_LOW_DETAIL_IMAGE_PIXEL_BUDGET, DEFAULT_MAX_IMAGES_PER_REQUEST, DEFAULT_MAX_INLINE_REQUEST_IMAGE_BYTES, DEFAULT_MAX_REQUEST_FILES_BYTES, DEFAULT_MAX_TOKENS, DEFAULT_REQUEST_IMAGE_MAX_BYTES, DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET, DEFAULT_STREAM_IDLE_TIMEOUT_MS, DeepSeekAdapter, DeepSeekFileId, DeepSeekFileStore, DeepSeekFilesClient, DeepSeekUploadIndex, MAX_CHAT_IMAGE_BYTES, MAX_FILE_EXPIRY_SECONDS, MAX_FILE_UPLOAD_BYTES, MAX_STORED_FILE_BYTES, MAX_STORED_FILE_COUNT, MIN_FILE_EXPIRY_SECONDS, PUBLIC_BASE_URL, apply, deepSeekFileScope, deepSeekImageRequestPricing, deepSeekImageTokens, inject, name, resolveAdapterOptions, resolveRequestImagePolicy };
+=======
+>>>>>>> upstream/v0.9.0

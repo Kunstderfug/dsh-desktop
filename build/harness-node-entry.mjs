@@ -94,6 +94,7 @@ if (!dshEntryPath) {
   process.stdout.write(`[harness-node] loading=${dshEntryPath}\n`)
   process.argv = [process.execPath, dshEntryPath, ...dshArguments]
   try {
+<<<<<<< HEAD
     // The entry must be this process's main module, not a module this file
     // imported. Harness entries gate their own dispatch behind
     // `import.meta.main` — `@deepseek-ai/dsh/lib/bin.js` does
@@ -107,7 +108,19 @@ if (!dshEntryPath) {
     // gets real main-module status while this file keeps preloading first.
     const { runMain } = await import('node:module')
     await runMain()
+=======
+    // Harness 0.1.5 gates its CLI behind `if (import.meta.main)` and exports
+    // `runCli`. This file imports the entry rather than being it, so that guard
+    // is false here and a plain import would load the module, run nothing, and
+    // let the process exit 0 with no diagnostics. Call the export when the
+    // entry offers one; older builds still self-execute on import.
+    const entry = await import(pathToFileURL(dshEntryPath).href)
+>>>>>>> upstream/v0.9.0
     process.stdout.write('[harness-node] DSH entry loaded\n')
+    if (typeof entry.runCli === 'function') {
+      process.stdout.write('[harness-node] invoking DSH runCli()\n')
+      await entry.runCli()
+    }
   } catch (error) {
     surfaceFailure('DSH entry failed', error)
   }
