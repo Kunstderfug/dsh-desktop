@@ -46,13 +46,22 @@ function readHarnessProvider(): { origin: string; apiKey: string } | null {
   try {
     const settings = parse(
       readFileSync(join(app.getPath('userData'), 'harness', 'settings.yaml'), 'utf8')
-    ) as { providers?: Record<string, ProviderSettings> }
-    for (const candidate of Object.values(settings.providers ?? {})) {
-      const base = candidate?.baseURL ?? ''
-      if (KNOWN_QUOTA_HOSTS.some((host) => base.includes(host))) {
-        provider = candidate
-        break
+    ) as {
+      providers?: Record<string, ProviderSettings>
+      'llm-pi-ai'?: { providers?: Record<string, ProviderSettings> }
+    }
+    // The active provider table lives under the llm-pi-ai plugin section;
+    // older installs kept it at the top level.
+    const tables = [settings['llm-pi-ai']?.providers, settings.providers]
+    for (const table of tables) {
+      for (const candidate of Object.values(table ?? {})) {
+        const base = candidate?.baseURL ?? ''
+        if (KNOWN_QUOTA_HOSTS.some((host) => base.includes(host))) {
+          provider = candidate
+          break
+        }
       }
+      if (provider !== null) break
     }
   } catch {
     return null
@@ -65,9 +74,17 @@ function readHarnessProvider(): { origin: string; apiKey: string } | null {
     return null
   }
   const keyEnv = provider.apiKeyEnv ?? ''
-  const apiKey = keyEnv === '' ? '' : (process.env[keyEnv] ?? '').trim()
-  if (apiKey === '') return null
-  return { origin, apiKey }
+  // Fall back to the well-known GLM key variables when the configured one is
+  // unset — installs commonly export ZHIPU_API_KEY while settings name
+  // ZAI_API_KEY (or the reverse), and they are the same credential.
+  const candidates = [keyEnv, 'ZAI_API_KEY', 'ZHIPU_API_KEY'].filter(
+    (name, index, all) => name !== '' && all.indexOf(name) === index
+  )
+  for (const name of candidates) {
+    const apiKey = (process.env[name] ?? '').trim()
+    if (apiKey !== '') return { origin, apiKey }
+  }
+  return null
 }
 
 async function refreshSnapshot(): Promise<GlmQuotaSnapshot> {

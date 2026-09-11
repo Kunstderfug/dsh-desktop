@@ -138,6 +138,17 @@ describe('main-process quota poller', () => {
     expect(snapshot.status).toBe('no-key')
   })
 
+  it('reads the provider from the llm-pi-ai section and falls back to ZHIPU_API_KEY', async () => {
+    setup(
+      'llm-pi-ai:\n  providers:\n    zai:\n      baseURL: https://api.z.ai/api/coding/paas/v4\n      apiKeyEnv: ZAI_API_KEY\n',
+      new Response('{"success":true,"code":200,"data":{"limits":[{"type":"TOKENS_LIMIT","percentage":7}]}}', { status: 200 })
+    )
+    process.env.ZHIPU_API_KEY = 'zhipu-fallback-key'
+    const snapshot = await handler() as { status: string }
+    expect(snapshot.status).toBe('ok')
+    delete process.env.ZHIPU_API_KEY
+  })
+
   it('maps a plan without monitoring access to unavailable', async () => {
     setup(settingsYaml, new Response('{}', { status: 403 }))
     process.env.ZAI_API_KEY = 'test-key'

@@ -1,16 +1,7 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
-index 306645f..9b69e89 100644
+index 306645f..4782e61 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
-@@ -255,7 +255,7 @@ window.__ModuleLoader__.load({
- 						text: node.summary,
- 						labels
- 					})
--				})]
-+				}), (0, react_jsx_runtime.jsx)(GlmQuotaPill, {})]
- 			});
- 		});
- 		//#endregion
 @@ -1124,7 +1124,10 @@ window.__ModuleLoader__.load({
  			return Math.max(1, Math.ceil(milliseconds / 1e3));
  		}
@@ -255,6 +246,15 @@ index 306645f..9b69e89 100644
  					dialog: {
  						open: openPill === "time",
  						setOpen: (open) => {
+@@ -4105,7 +4268,7 @@ window.__ModuleLoader__.load({
+ 							setOpenPill(open ? "usage" : null);
+ 						}
+ 					}
+-				})]
++				}), (0, react_jsx_runtime.jsx)(GlmQuotaPill, {})]
+ 			});
+ 		});
+ 		//#endregion
 @@ -8362,6 +8525,9 @@ window.__ModuleLoader__.load({
  		exports.inject = inject;
  		exports.isRunningTool = isRunningTool;
