@@ -1,0 +1,149 @@
+diff --git a/node_modules/@deepseek-ai/dsh-token-meter/lib/index.js b/node_modules/@deepseek-ai/dsh-token-meter/lib/index.js
+index 88d0832..6e375a1 100644
+--- a/node_modules/@deepseek-ai/dsh-token-meter/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-token-meter/lib/index.js
+@@ -446,6 +446,130 @@ const tokenUsageProjectionDefinition = {
+ 		view: (state) => state.totals
+ 	}
+ };
++const routeUsageEntrySchema = z$1.object({
++	provider: z$1.string(),
++	model: z$1.string(),
++	peak: projectionSchema,
++	offPeak: projectionSchema
++}).strict();
++/** The per-route unit's state schema — the one definition of its shape. */
++const routeUsageStateSchema = z$1.object({
++	routes: z$1.array(routeUsageEntrySchema),
++	last: z$1.object({
++		turn: z$1.number().int().nonnegative(),
++		step: z$1.number().int().nonnegative(),
++		provider: z$1.string(),
++		model: z$1.string(),
++		peak: z$1.boolean(),
++		buckets: projectionSchema
++	}).nullable()
++}).strict();
++/** Whether one event time falls in a DeepSeek peak window: 01:00-04:00 and 06:00-10:00 UTC, Monday-Friday. */
++function usagePeakWindow(time) {
++	const date = new Date(time);
++	const day = date.getUTCDay();
++	if (day === 0 || day === 6) return false;
++	const hour = date.getUTCHours() + date.getUTCMinutes() / 60;
++	return hour >= 1 && hour < 4 || hour >= 6 && hour < 10;
++}
++/** Provider/model provenance an Assistant settlement carries, when it has one. */
++function usageRoute(event) {
++	if (event.type !== "assistant/message") return void 0;
++	const source = event.data.message?.source;
++	if (source === void 0) return void 0;
++	const { provider, model } = source;
++	return typeof provider === "string" && typeof model === "string" && provider.length > 0 && model.length > 0 ? { provider, model } : void 0;
++}
++const addBuckets = (left, right) => ({
++	uncachedInputTokens: left.uncachedInputTokens + right.uncachedInputTokens,
++	outputTokens: left.outputTokens + right.outputTokens,
++	cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
++	cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens
++});
++const subtractBuckets = (left, right) => ({
++	uncachedInputTokens: Math.max(0, left.uncachedInputTokens - right.uncachedInputTokens),
++	outputTokens: Math.max(0, left.outputTokens - right.outputTokens),
++	cacheReadTokens: Math.max(0, left.cacheReadTokens - right.cacheReadTokens),
++	cacheWriteTokens: Math.max(0, left.cacheWriteTokens - right.cacheWriteTokens)
++});
++/** Add or remove one sample's contribution in its route and billing window. */
++function adjustRouteUsage(routes, provider, model, peak, buckets, sign) {
++	const next = routes.slice();
++	let index = next.findIndex((route) => route.provider === provider && route.model === model);
++	if (index === -1) {
++		if (sign === -1) return next;
++		next.push({
++			provider,
++			model,
++			peak: zeroBuckets(),
++			offPeak: zeroBuckets()
++		});
++		index = next.length - 1;
++	}
++	const route = next[index];
++	const window = peak ? "peak" : "offPeak";
++	const updated = sign === 1 ? addBuckets(route[window], buckets) : subtractBuckets(route[window], buckets);
++	next[index] = {
++		...route,
++		[window]: updated
++	};
++	return next;
++}
++/**
++* Token-meter's per-route usage projection unit.
++*
++* `tokenUsage` sums the whole durable log without saying which model produced
++* any of it, so a session that switches models cannot be priced and a session
++* that spans a DeepSeek peak boundary cannot be split. This unit folds the
++* same settlements into one row per provider/model and per billing window
++* (decided by the settlement's own timestamp), with the same replacement-slot
++* rule: a re-settled attempt replaces its prior contribution, and
++* `llm/retry-started` closes the slot so the retried attempt adds its own.
++*/
++const routeUsageProjectionDefinition = {
++	key: "routeUsage",
++	stateVersion: 1,
++	stateSchema: routeUsageStateSchema,
++	init: () => ({
++		routes: [],
++		last: null
++	}),
++	apply: (state, event) => {
++		if (event.type === "llm/retry-started") return state.last !== null && state.last.turn === event.data.turn && state.last.step === event.data.step ? {
++			...state,
++			last: null
++		} : state;
++		if (event.type !== "assistant/message" && event.type !== "assistant/attempt") return state;
++		const sample = usageOf(event);
++		if (sample === void 0) return state;
++		const { turn, step } = event.data;
++		const route = usageRoute(event);
++		const provider = route?.provider ?? "";
++		const model = route?.model ?? "";
++		const peak = usagePeakWindow(event.time);
++		const buckets = bucketsFrom(sample);
++		const previous = state.last !== null && state.last.turn === turn && state.last.step === step ? state.last : void 0;
++		if (previous !== void 0 && previous.provider === provider && previous.model === model && previous.peak === peak && bucketsEqual(previous.buckets, buckets)) return state;
++		let routes = state.routes;
++		if (previous !== void 0) routes = adjustRouteUsage(routes, previous.provider, previous.model, previous.peak, previous.buckets, -1);
++		routes = adjustRouteUsage(routes, provider, model, peak, buckets, 1);
++		return {
++			routes,
++			last: {
++				turn,
++				step,
++				provider,
++				model,
++				peak,
++				buckets
++			}
++		};
++	},
++	wire: {
++		viewSchema: z$1.array(routeUsageEntrySchema),
++		view: (state) => state.routes
++	}
++};
+ /**
+ * Token-meter's context-occupancy projection unit.
+ *
+@@ -615,6 +739,7 @@ var TokenMeter = class extends Service {
+ 		ctx.sessionProjections.register(tokenUsageProjectionDefinition);
+ 		ctx.sessionProjections.register(contextPressureProjectionDefinition);
+ 		ctx.sessionProjections.register(contextBreakdownProjectionDefinition);
++		ctx.sessionProjections.register(routeUsageProjectionDefinition);
+ 		ctx.on("session/event", (session) => {
+ 			if (this.states.has(session)) this._sync(session);
+ 		});
+@@ -779,4 +904,4 @@ var TokenMeter = class extends Service {
+ 	}
+ };
+ //#endregion
+-export { TokenMeter, TokenMeter as default };
++export { TokenMeter, TokenMeter as default, routeUsageProjectionDefinition };

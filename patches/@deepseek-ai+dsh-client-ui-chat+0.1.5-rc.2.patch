@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
-index 306645f..bd70246 100644
+index 306645f..afd85b3 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
 @@ -1124,7 +1124,10 @@ window.__ModuleLoader__.load({
@@ -14,7 +14,15 @@ index 306645f..bd70246 100644
  		}
  		function ModelRetryItem({ node, active, t }) {
  			const deadline = (0, react.useMemo)(() => Date.now() + node.delayMs, [node.delayMs, node.seq]);
-@@ -2694,6 +2697,8 @@ window.__ModuleLoader__.load({
+@@ -2634,6 +2637,7 @@ window.__ModuleLoader__.load({
+ 			"stats.dialog.toolTime": "工具调用用时",
+ 			"stats.dialog.ttft": "首 token 平均（TTFT）",
+ 			"stats.dialog.speed": "输出速度（TPS）",
++			"stats.dialog.price": "费用",
+ 			"chat.loadingHistory": "载入历史…",
+ 			"chat.loadError": "历史加载失败：{message}（{code}）",
+ 			"chat.loadOlder": "加载更早",
+@@ -2694,6 +2698,8 @@ window.__ModuleLoader__.load({
  			"message.retry.delay": "重试延迟：",
  			"message.retry.failure": "失败原因：",
  			"message.failure.auth": "API 密钥无效",
@@ -23,7 +31,15 @@ index 306645f..bd70246 100644
  			"message.turnError": "本轮运行失败",
  			"message.maxTokens": "已达到输出 token 上限",
  			"message.maxTokens.hint": "回答被截断，已有输出保留在对话中。发送“继续”可让模型接着输出。",
-@@ -2800,6 +2805,8 @@ window.__ModuleLoader__.load({
+@@ -2740,6 +2746,7 @@ window.__ModuleLoader__.load({
+ 			"stats.dialog.toolTime": "Tool time",
+ 			"stats.dialog.ttft": "Avg time to first token (TTFT)",
+ 			"stats.dialog.speed": "Tokens per second (TPS)",
++			"stats.dialog.price": "Price",
+ 			"chat.loadingHistory": "Loading history…",
+ 			"chat.loadError": "Failed to load history: {message} ({code})",
+ 			"chat.loadOlder": "Load earlier",
+@@ -2800,6 +2807,8 @@ window.__ModuleLoader__.load({
  			"message.retry.delay": "Retry delay: ",
  			"message.retry.failure": "Failure reason: ",
  			"message.failure.auth": "API key is invalid",
@@ -32,7 +48,7 @@ index 306645f..bd70246 100644
  			"message.turnError": "This turn failed",
  			"message.maxTokens": "Output token limit reached",
  			"message.maxTokens.hint": "The reply was cut off; earlier output is preserved in the conversation. Send \"continue\" to let the model resume.",
-@@ -3839,7 +3846,7 @@ window.__ModuleLoader__.load({
+@@ -3839,7 +3848,7 @@ window.__ModuleLoader__.load({
  		}
  		//#endregion
  		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-chat/src/client/chat/StatsPills.module.css.mjs
@@ -41,3 +57,125 @@ index 306645f..bd70246 100644
  		const tagId$1 = "@deepseek-ai/dsh-client-ui-chat/StatsPills.module.css";
  		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$1) + "]") === null) {
  			const tag = document.createElement("style");
+@@ -3941,10 +3950,83 @@ window.__ModuleLoader__.load({
+ 		function billedInputTokens(usage) {
+ 			return usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+ 		}
++		/**
++		* DeepSeek list prices in USD per 1M tokens, split by the provider's peak
++		* and off-peak windows. The durable routeUsage projection already separates
++		* every bucket by window and by provider/model, so pricing is one
++		* multiply-add per row. The retired legacy Flash ids are served by the same
++		* model and billed at the Flash price.
++		*/
++		const SESSION_PRICE_TABLE = {
++			deepseekFlash: {
++				cacheRead: { peak: 6e-3, offPeak: 3e-3 },
++				uncachedInput: { peak: 0.3, offPeak: 0.15 },
++				cacheWrite: { peak: 0.3, offPeak: 0.15 },
++				output: { peak: 1.2, offPeak: 0.6 }
++			},
++			deepseekPro: {
++				cacheRead: { peak: 0.044, offPeak: 0.022 },
++				uncachedInput: { peak: 1.32, offPeak: 0.66 },
++				cacheWrite: { peak: 1.32, offPeak: 0.66 },
++				output: { peak: 3.96, offPeak: 1.98 }
++			}
++		};
++		const SESSION_PRICE_MODELS = {
++			"deepseek-flash": "deepseekFlash",
++			"deepseek-v4-flash": "deepseekFlash",
++			"deepseek-v4-flash-vision-exp": "deepseekFlash",
++			"deepseek-v4-pro": "deepseekPro"
++		};
++		const SESSION_PRICE_PROVIDER = "deepseek-official";
++		function sessionPriceTable(provider, model) {
++			if (provider !== SESSION_PRICE_PROVIDER) return null;
++			const key = SESSION_PRICE_MODELS[model];
++			return key === void 0 ? null : SESSION_PRICE_TABLE[key];
++		}
++		function sessionRouteTokens(buckets) {
++			if (buckets === void 0) return 0;
++			return buckets.uncachedInputTokens + buckets.cacheReadTokens + buckets.cacheWriteTokens + buckets.outputTokens;
++		}
++		function sessionRouteCost(price, buckets, window) {
++			if (buckets === void 0) return 0;
++			return (buckets.uncachedInputTokens * price.uncachedInput[window] + buckets.cacheReadTokens * price.cacheRead[window] + buckets.cacheWriteTokens * price.cacheWrite[window] + buckets.outputTokens * price.output[window]) / 1e6;
++		}
++		/**
++		* Known session spend across every billed route, plus whether any billed
++		* tokens had no published price (a route outside DeepSeek's table).
++		* @param routes - the routeUsage projection value.
++		* @returns the USD total and whether it is a lower bound, or null when
++		* nothing billed yet.
++		*/
++		function sessionPrice(routes) {
++			if (!Array.isArray(routes) || routes.length === 0) return null;
++			let usd = 0;
++			let billed = 0;
++			let unpriced = 0;
++			for (const route of routes) {
++				const tokens = sessionRouteTokens(route.peak) + sessionRouteTokens(route.offPeak);
++				if (tokens === 0) continue;
++				billed += tokens;
++				const price = sessionPriceTable(route.provider, route.model);
++				if (price === null) {
++					unpriced += tokens;
++					continue;
++				}
++				usd += sessionRouteCost(price, route.peak, "peak") + sessionRouteCost(price, route.offPeak, "offPeak");
++			}
++			return billed === 0 ? null : {
++				usd,
++				partial: unpriced > 0
++			};
++		}
++		function formatSessionPrice(price) {
++			const decimals = price.usd < 1 ? 4 : 2;
++			return `${price.partial ? "≥" : ""}$${price.usd.toFixed(decimals)}`;
++		}
+ 		function exactCount(value, t) {
+ 			return t("message.turnUsage.count", { count: formatExactTokens(value, t) });
+ 		}
+-		function TimePill({ stats, t, dialog }) {
++		function TimePill({ stats, t, price, dialog }) {
+ 			const { open, setOpen, rootRef, panelRef, pos } = useStatDialog(dialog);
+ 			const counts = t("stats.counts", {
+ 				turns: stats.turns,
+@@ -4004,7 +4086,8 @@ window.__ModuleLoader__.load({
+ 								stats.llmMs > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.llmTime") }), (0, react_jsx_runtime.jsx)("dd", { children: formatDuration(stats.llmMs, t) })] }),
+ 								stats.toolMs > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.toolTime") }), (0, react_jsx_runtime.jsx)("dd", { children: formatDuration(stats.toolMs, t) })] }),
+ 								stats.ttftSteps > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.ttft") }), (0, react_jsx_runtime.jsx)("dd", { children: formatDuration(stats.ttftMs / stats.ttftSteps, t) })] }),
+-								stats.decodeMs > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.speed") }), (0, react_jsx_runtime.jsx)("dd", { children: t("message.tokensPerSecond", { tps: formatTokensPerSecond(stats.decodeTokens / (stats.decodeMs / 1e3)) }) })] })
++								stats.decodeMs > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.speed") }), (0, react_jsx_runtime.jsx)("dd", { children: t("message.tokensPerSecond", { tps: formatTokensPerSecond(stats.decodeTokens / (stats.decodeMs / 1e3)) }) })] }),
++								price !== null && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.price") }), (0, react_jsx_runtime.jsx)("dd", { children: formatSessionPrice(price) })] })
+ 							]
+ 						})
+ 					]
+@@ -4079,6 +4162,8 @@ window.__ModuleLoader__.load({
+ 		const StatsPills = (0, react.memo)(function StatsPills({ useChat, useProjection, t }) {
+ 			const settledNodes = useChat((s) => s.legacy.nodes);
+ 			const usage = useProjection("tokenUsage");
++			const routeUsage = useProjection("routeUsage");
++			const price = (0, react.useMemo)(() => sessionPrice(routeUsage), [routeUsage]);
+ 			const [openPill, setOpenPill] = (0, react.useState)(null);
+ 			const projected = useProjection("sessionStats");
+ 			const stats = (0, react.useMemo)(() => projected ?? deriveStats(settledNodes), [projected, settledNodes]);
+@@ -4090,6 +4175,7 @@ window.__ModuleLoader__.load({
+ 				children: [stats.steps > 0 && (0, react_jsx_runtime.jsx)(TimePill, {
+ 					stats,
+ 					t,
++					price,
+ 					dialog: {
+ 						open: openPill === "time",
+ 						setOpen: (open) => {
+@@ -8362,6 +8448,9 @@ window.__ModuleLoader__.load({
+ 		exports.inject = inject;
+ 		exports.isRunningTool = isRunningTool;
+ 		exports.isSettledTool = isSettledTool;
++		exports.SESSION_PRICE_TABLE = SESSION_PRICE_TABLE;
++		exports.formatSessionPrice = formatSessionPrice;
++		exports.sessionPrice = sessionPrice;
+ 		return module.exports;
+ 	}
+ });
