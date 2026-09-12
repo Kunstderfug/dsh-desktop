@@ -149,6 +149,26 @@ contextBridge.exposeInMainWorld('dshDesktopDirectoryPicker', {
 })
 
 /**
+ * Menu-accelerator bridge: the shell owns ⌘N / Ctrl+N (File → New Session) and
+ * forwards it to the Harness client plugin, which routes it into
+ * `uiWorkspace.startSession()` for the active workspace. Single-callback slot —
+ * the plugin registers once per page load.
+ */
+let newSessionHandler: (() => void) | undefined
+contextBridge.exposeInMainWorld('dshDesktopActions', {
+  onNewSession: (handler: unknown): void => {
+    newSessionHandler = typeof handler === 'function' ? (handler as () => void) : undefined
+  }
+})
+ipcRenderer.on('desktop:new-session', () => {
+  try {
+    newSessionHandler?.()
+  } catch (error: unknown) {
+    console.warn('[desktop] new-session handler failed', error)
+  }
+})
+
+/**
  * `[data-dsh-*]` lookups are attribute selectors with no index behind them, so
  * a miss costs a full tree walk. Caching the nodes turns the steady state into
  * an `isConnected` flag read, and a re-render that detaches them re-queries.

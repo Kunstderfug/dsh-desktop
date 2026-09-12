@@ -51,6 +51,15 @@ window.__ModuleLoader__.load({
           })
         )
       )
+      // Desktop ⌘N / Ctrl+N (File → New Session): the shell forwards the
+      // accelerator over its preload bridge; start the session flow for the
+      // current or most recent workspace. Deferred inject so the brand seats
+      // never wait on the workspace service.
+      ctx.inject(['uiWorkspace'], (scope) => {
+        const actions = window.dshDesktopActions
+        if (!actions || typeof actions.onNewSession !== 'function') return
+        actions.onNewSession(() => scope.uiWorkspace.startSession())
+      })
     }
 
     exports.apply = apply

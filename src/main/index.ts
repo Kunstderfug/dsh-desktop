@@ -2541,6 +2541,20 @@ function installMenu(): void {
       ]
       : []),
     {
+      label: isChinese ? '文件' : 'File',
+      submenu: [
+        {
+          label: isChinese ? '新建会话' : 'New Session',
+          accelerator: 'CmdOrCtrl+N',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('desktop:new-session')
+            }
+          }
+        }
+      ]
+    },
+    {
       label: 'Harness',
       submenu: [
         {
