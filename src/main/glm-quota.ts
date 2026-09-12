@@ -84,6 +84,20 @@ function readHarnessProvider(): { origin: string; apiKey: string } | null {
     const apiKey = (process.env[name] ?? '').trim()
     if (apiKey !== '') return { origin, apiKey }
   }
+  // The app's own Settings UI stores entered keys in the Harness credential
+  // store (harness/.credentials.yaml) keyed by the env-var name they back.
+  // Read it last so a real environment variable always wins.
+  try {
+    const credentials = parse(
+      readFileSync(join(app.getPath('userData'), 'harness', '.credentials.yaml'), 'utf8')
+    ) as { refs?: Record<string, string> }
+    for (const name of candidates) {
+      const apiKey = (credentials.refs?.[name] ?? '').trim()
+      if (apiKey !== '') return { origin, apiKey }
+    }
+  } catch {
+    // no credential store — fall through
+  }
   return null
 }
 

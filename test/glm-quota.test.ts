@@ -187,6 +187,27 @@ describe('main-process quota poller', () => {
     expect(snapshot.reason).toContain('ECONNREFUSED')
   })
 
+  it('reads the key from the Harness credential store when no env var is set', async () => {
+    writeFileSync(
+      path.join(testHome, 'harness', '.credentials.yaml'),
+      'version: 1\nrecords: {}\nrefs:\n  ZAI_API_KEY: credstore-key-value\n'
+    )
+    setup(settingsYaml, new Response('{"success":true,"code":200,"data":{"limits":[{"type":"TOKENS_LIMIT","percentage":9}]}}', { status: 200 }))
+    const snapshot = await handler() as { status: string }
+    expect(snapshot.status).toBe('ok')
+  })
+
+  it('prefers an environment variable over the credential store', async () => {
+    writeFileSync(
+      path.join(testHome, 'harness', '.credentials.yaml'),
+      'version: 1\nrecords: {}\nrefs:\n  ZAI_API_KEY: credstore-key-value\n'
+    )
+    setup(settingsYaml, new Response('{"success":true,"code":200,"data":{"limits":[{"type":"TOKENS_LIMIT","percentage":9}]}}', { status: 200 }))
+    process.env.ZAI_API_KEY = 'env-key-wins'
+    const snapshot = await handler() as { status: string }
+    expect(snapshot.status).toBe('ok')
+  })
+
   it('never sends the API key to the renderer', async () => {
     setup(
       settingsYaml,
