@@ -27,7 +27,7 @@ describe('workspace session unread markers', () => {
     expect(patch).toContain('"menu.markRead": "标为已读"')
     expect(patch).toContain('onContextMenu: (event) =>')
     expect(patch).toContain('event.preventDefault()')
-    expect(patch).toContain('if (!row.blank) setMenuOpen(true)')
+    expect(patch).toContain('if (!row.blank || isDraft) setMenuOpen(true)')
   })
 
   it('renders a durable unread treatment and clears it when the session is opened', async () => {

@@ -3620,7 +3620,7 @@ index 0000000..6226c83
 +//# sourceMappingURL=client.js.map
 \ No newline at end of file
 diff --git a/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js b/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
-index 0e94dd3..b60c449 100644
+index 0e94dd3..f9bda5f 100644
 --- a/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
 @@ -177,11 +177,15 @@ var ApiSessionAgentController = class {
@@ -3707,7 +3707,23 @@ index 0e94dd3..b60c449 100644
  	}
  	agentOptions() {
  		const { provider, model } = this.ctx.agentDefaultModel.currentSelection();
-@@ -652,6 +671,32 @@ var SessionCommandController = class {
+@@ -591,6 +610,15 @@ var SessionCommandController = class {
+ 				workspaceId: workspace.id
+ 			});
+ 		}
++		try {
++			/* Desktop draft persistence: materialize the header immediately so a
++			* created-but-never-prompted session survives restarts and an unsent
++			* draft can keep its row. Without this the session lives only as an
++			* in-memory pending entry that is gone after the process exits. */
++			await this.ctx.sessions.flush(adopted.session);
++		} catch (error) {
++			this.ctx.logger.warn(`session gateway: durable header flush for new session "${sessionId}" failed: ${String(error)}`);
++		}
+ 		const agentPreset = this.agents.presetForSession(adopted.session);
+ 		return {
+ 			sessionId,
+@@ -652,6 +680,32 @@ var SessionCommandController = class {
  			throw new RemoteError("gateway/internal", `failed to rename session "${request.sessionId}": ${String(error)}`, {});
  		}
  	}
@@ -3740,7 +3756,7 @@ index 0e94dd3..b60c449 100644
  	/**
  	* Create a new ordinary Session from one completed-turn prefix.
  	* @param request - source Session and optional event anchor.
-@@ -693,7 +738,7 @@ var SessionCommandController = class {
+@@ -693,7 +747,7 @@ var SessionCommandController = class {
  			const composition = await this.agents.composeAgent(this.agents.presetForObservation(source));
  			try {
  				const { provider, model } = this.ctx.agentDefaultModel.currentSelection();
@@ -3749,7 +3765,7 @@ index 0e94dd3..b60c449 100644
  					sessionId: childId,
  					seed: source.events.slice(0, cut),
  					inheritedEventCount: cut,
-@@ -709,6 +754,7 @@ var SessionCommandController = class {
+@@ -709,6 +763,7 @@ var SessionCommandController = class {
  					},
  					setup: composition.setup
  				});
@@ -3757,7 +3773,7 @@ index 0e94dd3..b60c449 100644
  			} catch (error) {
  				throw new RemoteError("gateway/internal", `failed to fork session "${request.sessionId}": ${String(error)}`, {});
  			}
-@@ -2485,6 +2531,7 @@ let SessionController = (() => {
+@@ -2485,6 +2540,7 @@ let SessionController = (() => {
  	let _canOpenWorkspacePath_decorators;
  	let _openWorkspacePath_decorators;
  	let _rename_decorators;
@@ -3765,7 +3781,7 @@ index 0e94dd3..b60c449 100644
  	let _fork_decorators;
  	let _prompt_decorators;
  	let _attachment_decorators;
-@@ -2504,6 +2551,7 @@ let SessionController = (() => {
+@@ -2504,6 +2560,7 @@ let SessionController = (() => {
  			_canOpenWorkspacePath_decorators = [Remote];
  			_openWorkspacePath_decorators = [Remote("openWorkspacePath")];
  			_rename_decorators = [Remote("rename")];
@@ -3773,7 +3789,7 @@ index 0e94dd3..b60c449 100644
  			_fork_decorators = [Remote("fork")];
  			_prompt_decorators = [Remote("prompt")];
  			_attachment_decorators = [Remote("attachment")];
-@@ -2600,6 +2648,17 @@ let SessionController = (() => {
+@@ -2600,6 +2657,17 @@ let SessionController = (() => {
  				},
  				metadata: _metadata
  			}, null, _instanceExtraInitializers);
@@ -3791,7 +3807,7 @@ index 0e94dd3..b60c449 100644
  			__esDecorate(this, null, _fork_decorators, {
  				kind: "method",
  				name: "fork",
-@@ -2747,7 +2806,8 @@ let SessionController = (() => {
+@@ -2747,7 +2815,8 @@ let SessionController = (() => {
  			ctx.plugin(SessionMediaReferences);
  			ctx.plugin(SessionSkillCatalog);
  			ctx.on("session/created", (session) => {
@@ -3801,7 +3817,7 @@ index 0e94dd3..b60c449 100644
  			});
  			ctx.on("session/disposed", (session) => {
  				ctx.emit("api-session/removed", session.id);
-@@ -2903,6 +2963,10 @@ let SessionController = (() => {
+@@ -2903,6 +2972,10 @@ let SessionController = (() => {
  		rename(request) {
  			return this.commands.rename(request);
  		}
