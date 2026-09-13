@@ -4,9 +4,11 @@
  * The ticket's Tasks bullet 1 asks for a scratch cordis plugin that registers
  * a debug command whose handler (a) spawns a continuable child host-side via
  * `ctx.subagents.startContinuable` and (b) queues a followup on the parent via
- * `agent.followup`. That plugin now exists as `/tmp/mt-t1-debug-pkg`
- * (`mt-t1-debug`, installed into this worktree's node_modules with
- * `npm install --no-save --install-links`; never committed). This spec
+ * `agent.followup`. That plugin is vendored in-repo at `./scratch-plugin/`
+ * (review round 2: a committed spec must not import an uncommitted
+ * node_modules package, so this spec resolves the module by relative path —
+ * the same module the live-session overlay mounted from the scratch /tmp
+ * package). This spec
  * composes the REAL harness in-process — real command registry
  * (`@deepseek-ai/dsh-commands`), real agent loop, real subagent runtime +
  * in-process spawn provider, real JSONL persistence — installs the scratch
@@ -38,7 +40,7 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import * as subagentSpawnInProcess from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import * as scratchPlugin from 'mt-t1-debug'
+import * as scratchPlugin from './scratch-plugin/index.js'
 
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {

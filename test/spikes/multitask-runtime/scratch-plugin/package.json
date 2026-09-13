@@ -1,0 +1,14 @@
+{
+  "name": "mt-t1-debug",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "[multitask ticket #1 spike] scratch cordis plugin registering a /mt-t1-debug command: host-side continuable spawn + queued parent followup. NOT shipped; vendored in-repo (review round 2) so the in-process spec resolves it at any fresh checkout.",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.2"
+  }
+}

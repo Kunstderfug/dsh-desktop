@@ -228,7 +228,12 @@ through the registry's real dispatch path (`ctx.commands.execute(agent, line,
 [], signal)` — including the `command/run`/`command/done` lifecycle events the
 registry itself appends): three green specs covering catalog listing,
 spawn+queue+settle end-to-end, and the non-interrupting queue behind a
-running turn.
+running turn. (Review-round-2 note on location/mount: the in-process spec now
+imports the plugin vendored in-repo at
+`test/spikes/multitask-runtime/scratch-plugin/` — a committed copy of this
+same module, resolved by relative path — because a committed test must not
+depend on an uncommitted node_modules package, while the live-session overlay
+mount described below still used the scratch `/tmp` package.)
 
 **`npm run dev` + scratch DSH_HOME — structurally blocked (documented with
 log excerpts).** The brief asked for `npm run dev` with a scratch DSH_HOME.
