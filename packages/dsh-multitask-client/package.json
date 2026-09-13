@@ -1,0 +1,23 @@
+{
+  "name": "dsh-multitask-client",
+  "version": "0.1.0",
+  "description": "Multitask/Orchestrator browser companion for DSH Desktop (scaffold placeholder).",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "react": "^18.3.1"
+  }
+}

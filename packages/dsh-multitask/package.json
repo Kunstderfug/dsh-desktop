@@ -1,0 +1,16 @@
+{
+  "name": "dsh-multitask",
+  "version": "0.1.0",
+  "description": "Multitask/Orchestrator host plugin for DSH Desktop (scaffold).",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  }
+}
