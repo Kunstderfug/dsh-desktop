@@ -13,7 +13,12 @@ session persistence, AgentRegistry, AgentLoop, SubagentRuntime +
 spawn-in-process provider, SessionQueryEngine. Every behavior under test —
 inbox, spawn, settlement, persistence — is the production code path. Gate:
 `python3 test/spikes/multitask-runtime/gate.py --filter multitask_runtime_spike`.
-All seven specs pass; `VERDICT: go` at the end.
+All seven specs pass; `VERDICT: go` at the end. Correction round 1 added
+`test/spikes/multitask-runtime/scratch-debug-plugin.test.ts` (three more
+specs: the ticket's scratch debug plugin driven through the real
+`@deepseek-ai/dsh-commands` registry dispatch) and the live dev-app evidence
+under `test/spikes/multitask-runtime/evidence/` — see "Real dev-app
+observation" below.
 
 Composition order (worked first try once the ordering below was used; this is
 the answer to the trap that stalled t1/t1b — the `llm` service must exist
@@ -188,15 +193,104 @@ duty: the queue mechanism is real; its crash-only persistence is the finding.
 4. **§2.2 "agent/status published on every phase transition" — OBSERVED
    indirectly:** the wake test relies on the idle→running→idle transitions the
    loop publishes (`node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js:781`).
-5. **Not exercised (legitimate scope cuts):** the GUI/dev-app channel was not
-   attempted — the orchestrator declared the dev-app lane UNAVAILABLE for this
-   run (machine-wide serialization; two sibling lanes collided on the shared
-   `dsh-desktop-dev` launch root and broke each other's boot, one dying in
-   `dsh-app-boot` overlay loading). The runtime proof does not depend on it:
-   every seam above is exercised in-process against the installed packages.
-   Also not exercised: `toolFilter`/persona composition, workflow children,
-   one-shot runs, and the plan-mode mode-switch — none are required to answer
-   the §5.2 runtime question.
+5. **Dev-app channel — was UNAVAILABLE in the original delivery, now
+   performed; the literal `npm run dev` + scratch-DSH_HOME channel DEVIATES to
+   a documented structural blocker while the harness-entry lane is OBSERVED**
+   (both lanes, with captured evidence, in "Real dev-app observation" below).
+   Still not exercised (legitimate scope cuts): `toolFilter`/persona
+   composition, workflow children, one-shot runs, and the plan-mode
+   mode-switch — none are required to answer the §5.2 runtime question.
+
+## Real dev-app observation (correction round 1)
+
+The original delivery left the dev-app channel UNAVAILABLE (item 5 below).
+The correction round performed it for real, in two parts.
+
+**The ticket's scratch debug plugin (P2) — OBSERVED.**
+`/tmp/mt-t1-debug-pkg` (package `mt-t1-debug`, uncommitted) is a cordis plugin
+following the `@deepseek-ai/dsh-command-goal` shape (`name`/`inject`/`apply`)
+whose `apply` registers ONE debug command on the real registry:
+`ctx.commands.register({ name: 'mt-t1-debug', … handler })` — the
+plugin-reachable command API (`@deepseek-ai/dsh-commands`, mounted by the
+`dsh-base` bundle at `node_modules/@deepseek-ai/dsh-base/cordis.patch.yml:287`,
+`CommandRuntime.register` at
+`node_modules/@deepseek-ai/dsh-commands/lib/index.js:546`). The handler does
+exactly the ticket's two moves: `ctx.subagents.startContinuable({ provider:
+'spawn', label, request: { prompt, parent } })` (child inherits the parent's
+model when `agentOptions` is omitted — `resolveChildAgentOptions`,
+`node_modules/@deepseek-ai/dsh-subagent/lib/index.js:468`), then
+`agent.followup(createUserMessage(...))` on the parent
+(`node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js:789`). It is installed
+into this worktree's node_modules with `npm install --no-save --install-links
+file:/tmp/mt-t1-debug-pkg` (uncommitted node_modules change) and driven
+in-process by `test/spikes/multitask-runtime/scratch-debug-plugin.test.ts`
+through the registry's real dispatch path (`ctx.commands.execute(agent, line,
+[], signal)` — including the `command/run`/`command/done` lifecycle events the
+registry itself appends): three green specs covering catalog listing,
+spawn+queue+settle end-to-end, and the non-interrupting queue behind a
+running turn.
+
+**`npm run dev` + scratch DSH_HOME — structurally blocked (documented with
+log excerpts).** The brief asked for `npm run dev` with a scratch DSH_HOME.
+That combination is impossible with committed code: on macOS Electron resolves
+`appData`/`logs` from the real user paths regardless of `$HOME`, and the
+desktop pins the harness child's `DSH_HOME` to `userData/harness`
+(`configureAppIdentity`, `src/main/index.ts:504-508`;
+`buildHarnessSpawnOptions` overrides any inherited `DSH_HOME`,
+`src/main/runtime/harness-runtime.ts:283-312`). The probe boot
+(`HOME=/tmp/mt-t1-scratch-home/host REMOTE_DEBUGGING_PORT=9226 npm run dev`)
+produced `[harness-node] DSH_HOME=/Users/slav/Library/Application Support/
+dsh-desktop-dev/harness` — the shared dev home — plus normal shared-home
+maintenance lines ("previous Harness stopped", "cleared 1 stale Harness
+authentication cookie(s)"). Full excerpt:
+`test/spikes/multitask-runtime/evidence/dev-boot-shared-home-excerpt.txt`.
+The boot was killed immediately after this became visible; the residual
+contact is the desktop's ordinary dev-home maintenance, reported here
+honestly.
+
+**Live session in the real composed harness — OBSERVED.** The compliant lane
+boots the SAME harness entry the desktop spawns (`node
+node_modules/@deepseek-ai/dsh/lib/bin.js web --patch build/dsh-desktop.patch.yml
+--no-open --host 127.0.0.1 --port 43140` — the repo's own
+`scripts/verify-harness-auth.mjs` precedent) with `DSH_HOME` pointing at the
+scratch copy of the dev profile. The scratch profile's `cordis.patch.yml`
+gained the overlay row (`- insert: [{id: mt-t1-debug, name: mt-t1-debug}]`)
+ONLY there; the package itself was copied into the scratch profile's
+`node_modules/` (the loader resolves plugin names from the profile directory —
+`createRequire(baseUrl).resolve`, `node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js:288-296`).
+The boot composed the full desktop stack ("[multitask] plugin active") and
+served `dsh web: http://127.0.0.1:43140/?token=…`; the pnpm shim write landed
+inside the scratch home (isolation proof). Evidence:
+`test/spikes/multitask-runtime/evidence/harness-boot-stdout-excerpt.txt`.
+
+The live session (`session-e7c29cbe-aa51-4369-adbf-09ce369de541`) was driven
+over the harness's authenticated `/api` channel exactly like the web client
+(token → cookie → POST `/api/<namespace>/<method>`). Captured transcript:
+`test/spikes/multitask-runtime/evidence/live-session-catalog-and-execution.json`.
+What the real app showed:
+
+1. **The scratch plugin mounted and the command is discoverable** —
+   `commands/list` returned a 7-command catalog including `mt-t1-debug`.
+2. **Host-side continuable spawn from the debug command (spec §4.2)** —
+   `commands/execute` returned `{ kind: 'success', text: "spawned continuable
+   child 0b26692d-d41e-4cec-9a82-05bc01c066e2 …" }`; the durable parent log
+   gained `subagent/catalog` at seq 4: `{ childId:
+   "0b26692d-…", mode: 'continuable', label: 'mt-t1-debug continuable child' }`
+   — the ticket's catalog key, live.
+3. **The queued followup did not interrupt and was consumed at the turn
+   boundary (spec §4.1/§2.2)** — `agent/inbox/spliced { target: 'next-turn' }`
+   at seq 5 parked the handoff; `command/done` (seq 8) recorded the handler's
+   success; the handoff was then admitted as the parent's own turn input
+   (`user/message` at seq 11 — the session title even fell back to its text).
+4. **Settlement steering into a running turn (spec §4.2/§5.2)** — the child
+   settled while the parent's handoff turn was still running: the settlement
+   notice arrived as `agent/inbox/spliced { target: 'next-step' }` at seq 34
+   ("Background subagent 0b26692d-… finished and will do no further work
+   unless you send it more.") — the running-parent arm observed live.
+5. **Durable children on disk** — both probe runs left child session
+   directories under the scratch home
+   (`sessions/--tmp-mt-t1-scratch-workspace--/0b26692d-…/` and `2e107009-…`),
+   alongside the two parent sessions.
 
 ## Verdict
 

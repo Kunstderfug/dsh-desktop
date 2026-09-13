@@ -1,0 +1,38 @@
+Dev-boot probe (STEP 2 of the correction brief): `npm run dev` with a scratch
+HOME does not reach the harness child. Booted 2026-09-13T21:52:09Z with
+`HOME=/tmp/mt-t1-scratch-home/host REMOTE_DEBUGGING_PORT=9226 npm run dev`
+from the corrections worktree. Electron resolved appData/logs from the real
+user paths, so the harness child was pinned to the SHARED dsh-desktop-dev
+home — the scratch DSH_HOME was never consulted. Excerpt from the real
+`~/Library/Logs/DSH Desktop Dev/harness.log` for that boot:
+
+    +    1ms [desktop] launch requested (web profile)
+    +   74ms [desktop] splash shown
+    +   74ms [desktop] previous Harness stopped; starting profile maintenance
+    +  143ms [desktop] profile maintenance done
+    +  145ms [desktop] starting 2026-09-13T21:52:09.551Z
+    +  145ms [desktop] launch directory /Users/slav/Library/Application Support/dsh-desktop-dev/launch-root
+    +  145ms [desktop] profile web
+    +  145ms [desktop] patch /Volumes/DEV/dsh-desktop.20260913-194647.t1-runtime-corrections/build/dsh-desktop.patch.yml
+    +  145ms [desktop] endpoint http://127.0.0.1:43130
+    +  148ms [desktop] Bundled Node.js Harness process started
+    +  213ms [stdout] [harness-node] runtime node=v24.18.1 platform=darwin arch=arm64
+    +  213ms [stdout] [harness-node] cwd=/Users/slav/Library/Application Support/dsh-desktop-dev/launch-root
+    +  213ms [stdout] [harness-node] DSH_HOME=/Users/slav/Library/Application Support/dsh-desktop-dev/harness
+    + 1497ms [stdout] [multitask] plugin active
+    + 2799ms [stdout] dsh web: http://127.0.0.1:43130/?token=…
+    +61096ms [desktop] cleared 1 stale Harness authentication cookie(s)
+
+Structural reading (src/main/index.ts:504-508, src/main/runtime/harness-runtime.ts:283-312):
+`configureAppIdentity()` pins dev userData to `app.getPath('appData') +
+'dsh-desktop-dev'` and the harness spawn env overrides any inherited
+`DSH_HOME` with `dshHome = userData/harness`. On macOS `appData`/`logs` come
+from the real user paths regardless of `$HOME`, so `npm run dev` can only ever
+compose the shared dev home — and the boot itself performs shared-home
+maintenance ("previous Harness stopped", "cleared … cookie(s)", pnpm shim
+rewrite). A scratch DSH_HOME is structurally unreachable for the Electron
+shell without editing committed code. The compliant live lane therefore booted
+the same harness entry the desktop spawns (`node
+node_modules/@deepseek-ai/dsh/lib/bin.js web --patch
+build/dsh-desktop.patch.yml …`) with `DSH_HOME` pointing at the scratch copy —
+see live-session-catalog-and-execution.json and the report's dev-app section.

@@ -1,0 +1,53 @@
+Clean live lane: the real harness entry booted against the scratch DSH_HOME
+(overlay row for the scratch `mt-t1-debug` plugin present ONLY in the copied
+profile's cordis.patch.yml). Boot stdout, captured 2026-09-13T22:00Z:
+
+    [multitask] plugin active
+    dsh-desktop: pnpm shim written via /tmp/mt-t1-scratch-home/host/Library/Application Support/dsh-desktop-dev/harness/.desktop-bin/pnpm-runner.mjs
+    dsh web: http://127.0.0.1:43140/?token=fxlsgyQj1xEudqN7itx0Yk5rU0Ed_frdcxaO_5SPj0Q
+
+Isolation proof: the pnpm shim (the only side-effecting write) landed inside
+/tmp/mt-t1-scratch-home/…; the shared dsh-desktop-dev home was not written by
+this boot. The boot composed the full desktop patch stack (build/
+dsh-desktop.patch.yml from the worktree — the same file `npm run dev` passes)
+plus the scratch profile overlay, and `dsh-multitask` activated ("[multitask]
+plugin active").
+
+Live session (session-e7c29cbe-aa51-4369-adbf-09ce369de541, cwd
+/tmp/mt-t1-scratch-workspace), driven over the harness's authenticated
+/api channel exactly like the web client (token → cookie → POST
+/api/<namespace>/<method>): see live-session-catalog-and-execution.json for
+the full transcript. Key wire steps:
+
+  commands/list  → catalog (7): compact, export, feedback, goal, mt-t1-debug,
+                   permission, plan
+  commands/execute (agentId, "/mt-t1-debug mt-t1 live: summarize …")
+                 → { commandId: "cmd-6eb5eb5f-2", result: { kind: "success",
+                     text: "spawned continuable child
+                     0b26692d-d41e-4cec-9a82-05bc01c066e2 ( message
+                     d06077c3-0660-4021-ba12-5a97dede093e); queued followup
+                     \"mt-t1-debug handoff: orchestrate while the child works
+                     (child 0b26692d-…)\"" } }
+
+Durable parent-session records observed by session/page polling (seq = log
+position):
+
+  seq 4  subagent/catalog      { version: 0,
+                                 childId: "0b26692d-d41e-4cec-9a82-05bc01c066e2",
+                                 mode: "continuable",
+                                 label: "mt-t1-debug continuable child" }
+  seq 5  agent/inbox/spliced   { target: "next-turn", inserted: [handoff text] }
+  seq 8  command/done          { commandId: "cmd-6eb5eb5f-2", kind: "success" }
+  seq 11 user/message          the handoff admitted as the parent's turn input
+                               (source kind "user"); session/title even fell
+                               back to it ("mt-t1-debug handoff: orchestrate …")
+  seq 34 agent/inbox/spliced   { target: "next-step", inserted: ["Background
+                                 subagent 0b26692d-… finished and will do no
+                                 further work unless you send it more."] }
+
+The seq-34 splice is the settlement notice STEERED into the parent's
+still-running turn (the handoff turn was still in flight when the child
+settled) — the running-parent arm of §5.2 observed live. The child's own
+session persisted durably under the scratch home:
+sessions/--tmp-mt-t1-scratch-workspace--/0b26692d-d41e-4cec-9a82-05bc01c066e2/
+(also 2e107009-… from a first probe run and the two parent sessions).

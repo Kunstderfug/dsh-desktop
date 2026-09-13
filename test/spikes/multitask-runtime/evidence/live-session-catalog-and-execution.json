@@ -1,0 +1,198 @@
+{
+  "base": "http://127.0.0.1:43140",
+  "prompt": "mt-t1 live: summarize the multitask runtime spike findings",
+  "steps": [
+    {
+      "step": "session/create",
+      "detail": "session-e7c29cbe-aa51-4369-adbf-09ce369de541",
+      "at": "2026-09-13T22:01:11.773Z"
+    },
+    {
+      "step": "commands/list",
+      "detail": "catalog (7): compact, export, feedback, goal, mt-t1-debug, permission, plan",
+      "at": "2026-09-13T22:01:11.777Z"
+    },
+    {
+      "step": "commands/execute",
+      "detail": "{\"commandId\":\"cmd-6eb5eb5f-2\",\"result\":{\"kind\":\"success\",\"text\":\"spawned continuable child 0b26692d-d41e-4cec-9a82-05bc01c066e2 (message d06077c3-0660-4021-ba12-5a97dede093e); queued followup \\\"mt-t1-debug handoff: orchestrate while the child works (child 0b26692d-d41e-4cec-9a82-05bc01c066e2)\\\"\"}}",
+      "at": "2026-09-13T22:01:11.797Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=18 seen=18 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:13.810Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=19 seen=19 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:15.815Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=26 seen=26 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:17.820Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=31 seen=31 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:19.830Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=31 seen=31 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:21.834Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=31 seen=31 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:23.842Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=31 seen=31 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:25.851Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=31 seen=31 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:27.859Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=31 seen=31 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:29.864Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=33 seen=33 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:31.875Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=33 seen=33 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:33.888Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=33 seen=33 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:35.895Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=33 seen=33 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:37.902Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=33 seen=33 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:39.908Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=33 seen=33 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:41.919Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=33 seen=33 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:43.930Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=33 seen=33 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:45.938Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=33 seen=33 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:47.948Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=34 seen=34 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:49.955Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=34 seen=34 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:51.960Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=34 seen=34 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:53.966Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=34 seen=34 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:55.972Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=34 seen=34 cursor=0 handoff=true settlement=false",
+      "at": "2026-09-13T22:01:57.984Z"
+    },
+    {
+      "step": "poll",
+      "detail": "records=35 seen=35 cursor=0 handoff=true settlement=true",
+      "at": "2026-09-13T22:01:59.993Z"
+    }
+  ],
+  "sessionId": "session-e7c29cbe-aa51-4369-adbf-09ce369de541",
+  "commandCatalog": [
+    "compact",
+    "export",
+    "feedback",
+    "goal",
+    "mt-t1-debug",
+    "permission",
+    "plan"
+  ],
+  "mtCommand": {
+    "name": "mt-t1-debug",
+    "description": "[multitask spike] spawn a continuable child and queue a parent followup",
+    "input": {
+      "hint": "[<prompt for the continuable child>]"
+    }
+  },
+  "execution": {
+    "commandId": "cmd-6eb5eb5f-2",
+    "result": {
+      "kind": "success",
+      "text": "spawned continuable child 0b26692d-d41e-4cec-9a82-05bc01c066e2 (message d06077c3-0660-4021-ba12-5a97dede093e); queued followup \"mt-t1-debug handoff: orchestrate while the child works (child 0b26692d-d41e-4cec-9a82-05bc01c066e2)\""
+    }
+  },
+  "observedHandoff": true,
+  "observedSettlement": true,
+  "observedChildPrompt": true,
+  "interesting": [
+    {
+      "type": "event",
+      "excerpt": "{\"type\":\"event\",\"event\":{\"type\":\"subagent/catalog\",\"seq\":4,\"time\":1789336871795,\"data\":{\"version\":0,\"childId\":\"0b26692d-d41e-4cec-9a82-05bc01c066e2\",\"childCreatedAt\":1789336871780,\"mode\":\"continuable\",\"label\":\"mt-t1-debug continuable child\"}}}"
+    },
+    {
+      "type": "event",
+      "excerpt": "{\"type\":\"event\",\"event\":{\"type\":\"agent/inbox/spliced\",\"seq\":5,\"time\":1789336871795,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"content\":[{\"type\":\"text\",\"text\":\"mt-t1-debug handoff: orchestrate while the child works (child 0b26692d-d41e-4cec-9a82-05bc01c066e2)\"}],\"source\":{\"kind\":\"user\"},\"ro"
+    },
+    {
+      "type": "event",
+      "excerpt": "{\"type\":\"event\",\"event\":{\"type\":\"command/done\",\"seq\":8,\"time\":1789336871796,\"data\":{\"commandId\":\"cmd-6eb5eb5f-2\",\"kind\":\"success\",\"text\":\"spawned continuable child 0b26692d-d41e-4cec-9a82-05bc01c066e2 (message d06077c3-0660-4021-ba12-5a97dede093e); queued followup \\\"mt-t1-debug handoff: orchestrate "
+    },
+    {
+      "type": "event",
+      "excerpt": "{\"type\":\"event\",\"event\":{\"type\":\"user/message\",\"seq\":11,\"time\":1789336871837,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"mt-t1-debug handoff: orchestrate while the child works (child 0b26692d-d41e-4cec-9a82-05bc01c066e2)\"}],\"source\":{\"kind\":\"user\"},\"role\":\"user\",\"id\":\"5dd5ee57-0ac1-41ee-95ff-f64624d9c"
+    },
+    {
+      "type": "event",
+      "excerpt": "{\"type\":\"event\",\"event\":{\"type\":\"session/title\",\"seq\":16,\"time\":1789336871839,\"data\":{\"title\":\"mt-t1-debug handoff: orchestrate while t\",\"messageSeqs\":[11],\"source\":{\"kind\":\"fallback\"}}}}"
+    },
+    {
+      "type": "event",
+      "excerpt": "{\"type\":\"event\",\"event\":{\"type\":\"session/title-llm-request\",\"seq\":17,\"time\":1789336871839,\"data\":{\"titleProvider\":\"session-title-first-prompt-llm\",\"messageSeqs\":[11],\"route\":{\"provider\":\"zai\",\"model\":\"glm-5.3-flash\"},\"system\":\"Create a concise title for an AI coding-assistant session from the suppli"
+    },
+    {
+      "type": "event",
+      "excerpt": "{\"type\":\"event\",\"event\":{\"type\":\"agent/inbox/spliced\",\"seq\":34,\"time\":1789336919783,\"data\":{\"target\":\"next-step\",\"start\":1,\"inserted\":[{\"content\":[{\"type\":\"text\",\"text\":\"Background subagent 0b26692d-d41e-4cec-9a82-05bc01c066e2 finished and will do no further work unless you send it more.\"},{\"type\":\""
+    }
+  ]
+}
