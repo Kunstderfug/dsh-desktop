@@ -12,6 +12,10 @@
  * event-only listeners, no service, config-read at apply time.
  */
 import { resolve } from 'node:path'
+// The fs-intent denials must carry the harness's typed FsError identity
+// ({ name: 'FsError', code }) exactly like every built-in fs error, so the
+// tool result keeps machine-routable info instead of a plain Error string.
+import { FsError } from '@deepseek-ai/dsh-fs'
 
 /** Stable cordis plugin name (loader diagnostics). */
 const name = 'multitask-claims-guard'
@@ -73,13 +77,13 @@ function apply(ctx, config) {
     writeIntentHits += 1
     if (!isClaimedPath(target.displayPath, probePath) && String(target.targetKey) !== probePath) return next()
     console.log(`[multitask-claims-guard] fs/write-intent deny (hit #${writeIntentHits}) path=${probePath}`)
-    throw new Error(`fs/write-intent: ${CLAIM_REASON}`)
+    throw new FsError(`fs/write-intent: ${CLAIM_REASON}`, 'FS_PERMISSION_DENIED')
   })
   ctx.on('fs/edit-intent', async (target, _actor, next) => {
     editIntentHits += 1
     if (!isClaimedPath(target.displayPath, probePath) && String(target.targetKey) !== probePath) return next()
     console.log(`[multitask-claims-guard] fs/edit-intent deny (hit #${editIntentHits}) path=${probePath}`)
-    throw new Error(`fs/edit-intent: ${CLAIM_REASON}`)
+    throw new FsError(`fs/edit-intent: ${CLAIM_REASON}`, 'FS_PERMISSION_DENIED')
   })
 
   console.log(`[multitask-claims-guard] mounted; probe path ${probePath}`)

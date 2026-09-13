@@ -33,7 +33,7 @@ import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
-import { FsError } from '@deepseek-ai/dsh-fs'
+import { FsError, FsTargetKey } from '@deepseek-ai/dsh-fs'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import SessionStore from '@deepseek-ai/dsh-session'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -513,5 +513,55 @@ describe('multitask_claims_spike', () => {
     expect(allowed.isError).toBe(false)
     expect(readFileSync(allowedPath, 'utf8')).toBe('fine\n')
     logSpy.mockRestore()
+  })
+
+  it('dev lane: the committed guard module’s fs-intent listeners throw the FsError identity (FS_PERMISSION_DENIED), not a plain Error', async () => {
+    // The module's fs-intent half cannot fire inside a full composition that
+    // also mounts its pre-execute half (the pre-execute deny short-circuits
+    // before the fs waterfall dispatches — behavior b), so the identity is
+    // asserted on the real cordis waterfall directly, with the exact
+    // dispatch shape dsh-tool-fs uses (lib/index.js:650 write / :801 edit):
+    // ctx.waterfall(event, target, actor, innerDefault).
+    const probePath = '/tmp/multitask-claims-guard-fs-intent-probe.txt'
+    const ctx = new Context()
+    try {
+      const guard = (await import(new URL('./multitask-claims-guard.mjs', import.meta.url).href)) as {
+        name: string
+        apply(ctx: CordisContext, config?: { probePath?: string }): void
+      }
+      guard.apply(ctx, { probePath })
+
+      const writeTarget = { targetKey: FsTargetKey(probePath), displayPath: probePath }
+      const writeRejection: unknown = await ctx
+        .waterfall('fs/write-intent', writeTarget, undefined, () => undefined)
+        .then(() => null, (error: unknown) => error)
+      expect(writeRejection, 'fs/write-intent must reject').toBeInstanceOf(FsError)
+      const writeError = writeRejection as FsError
+      expect(writeError.name).toBe('FsError')
+      expect(writeError.code).toBe('FS_PERMISSION_DENIED')
+      expect(writeError.message).toBe(`fs/write-intent: ${CLAIM_REASON}`)
+
+      const editTarget = { targetKey: FsTargetKey(probePath), displayPath: probePath }
+      const editRejection: unknown = await ctx
+        .waterfall('fs/edit-intent', editTarget, undefined, () => undefined)
+        .then(() => null, (error: unknown) => error)
+      expect(editRejection, 'fs/edit-intent must reject').toBeInstanceOf(FsError)
+      expect((editRejection as FsError).code).toBe('FS_PERMISSION_DENIED')
+      expect((editRejection as FsError).message).toBe(`fs/edit-intent: ${CLAIM_REASON}`)
+
+      // A non-target path is forwarded with next(): the inner default decides
+      // (the same `() => void 0` default dsh-tool-fs dispatches with), so the
+      // abstention flows through as "no denial".
+      const otherKey = FsTargetKey('/tmp/mt-claims-other.txt')
+      const other = await ctx.waterfall(
+        'fs/write-intent',
+        { targetKey: otherKey, displayPath: '/tmp/mt-claims-other.txt' },
+        undefined,
+        () => undefined
+      )
+      expect(other).toBeUndefined()
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 })
