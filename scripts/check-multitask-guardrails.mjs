@@ -349,6 +349,11 @@ async function assertRapidSettleCap() {
       return isResearcherCall(call) ? STRUCTURED_REPORT : `parent ack: ${userText(call.request).slice(0, 80)}`
     }
   })
+  const approvedWriterArguments = []
+  app.ctx.on('tools/pre-execute', (exec, next) => {
+    if (exec.name === 'subagent') approvedWriterArguments.push(exec.arguments)
+    return next()
+  })
   app.ctx.on('subagent/end', (info) => {
     ends.set(String(info.id), String(info.stopReason ?? ''))
   })
@@ -410,7 +415,7 @@ async function assertRapidSettleCap() {
     if (uniqueTasks.size !== queuedAfter.length && queuedAfter.length > 0) {
       fail('later handoff queue was not unique per task')
     }
-    if (newQueued.length > 1) fail(`refusal duplicated the later handoff (${newQueued.length})`)
+    if (queuedAfter.length !== 1) fail(`refusal must leave exactly one later handoff queued (got ${queuedAfter.length})`)
 
     const firstId = childIdOf(first) || liveBefore[0]
     holdA.open()
@@ -431,6 +436,11 @@ async function assertRapidSettleCap() {
     for (const call of app.calls.filter((call) => isWriterCall(call, 'stays live'))) {
       if (userText(call.request).includes(PARENT_HELD)) {
         fail('writer child model input included a parent-held path')
+      }
+    }
+    for (const args of approvedWriterArguments) {
+      if (JSON.stringify(args).includes(PARENT_HELD)) {
+        fail('approved writer tool arguments included a parent-held path')
       }
     }
 

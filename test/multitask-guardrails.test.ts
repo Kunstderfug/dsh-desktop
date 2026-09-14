@@ -93,6 +93,7 @@ interface Fixture {
   ctx: Context
   home: string
   calls: ScriptedCall[]
+  approvedWriterArguments: unknown[]
   agent: Agent
 }
 
@@ -159,6 +160,11 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
     }
   )
   push(() => mounted.dispose())
+  const approvedWriterArguments: unknown[] = []
+  ctx.on('tools/pre-execute', (exec: { name?: string, arguments?: unknown }, next) => {
+    if (exec.name === 'subagent') approvedWriterArguments.push(exec.arguments)
+    return next()
+  })
   const writers = await ctx.plugin(toolSubagent as unknown as Parameters<Context['plugin']>[0], {
     provider: 'spawn',
     backgroundMode: 'continuable'
@@ -172,7 +178,7 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
   })
   push(() => handle.dispose())
 
-  return { ctx, home, calls, agent: handle.agent }
+  return { ctx, home, calls, approvedWriterArguments, agent: handle.agent }
 }
 
 function registerMutationTools(ctx: Context): void {
@@ -443,6 +449,10 @@ describe('multitask_guardrails_gate writer admission', () => {
       queuedAfter.filter(message => !queuedBefore.includes(message.id)).length <= 1,
       'refusal must not duplicate the later handoff'
     ).toBe(true)
+    expect(
+      queuedAfter,
+      'refusal must leave exactly one later handoff queued'
+    ).toHaveLength(1)
 
     const firstId = String((first as { value?: { subagentId?: string } }).value?.subagentId
       ?? (first as { value?: { childId?: string } }).value?.childId
@@ -470,6 +480,9 @@ describe('multitask_guardrails_gate writer admission', () => {
     const writerCalls = f.calls.filter(call => isWriterCall(call, 'writer C stays live') || isWriterCall(call, 'writer A stays live') || isWriterCall(call, 'writer B stays live'))
     for (const call of writerCalls) {
       expect(userText(call.request), 'child model input must omit parent-held paths').not.toContain(PARENT_HELD)
+    }
+    for (const args of f.approvedWriterArguments) {
+      expect(JSON.stringify(args), 'approved writer tool arguments must omit parent-held paths').not.toContain(PARENT_HELD)
     }
 
     holdB.open()

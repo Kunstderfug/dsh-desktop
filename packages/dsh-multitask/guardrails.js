@@ -11,9 +11,10 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { Service } from '@deepseek-ai/cordis'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { effectiveClaims } from './claims.js'
 import { RESEARCHER_LABEL } from './researcher.js'
-import { latestTask } from './round-driver.js'
+import { latestTask, renderHandoffPrompt } from './round-driver.js'
 
 /** Plugin config default for `multitask.maxWriters`. */
 export const DEFAULT_MAX_WRITERS = 2
@@ -26,6 +27,7 @@ export const WRITER_TOOL_NAME = 'subagent'
 
 const admission = new AsyncLocalStorage()
 const wrappedRuntimes = new WeakSet()
+const wrappedToolRuntimes = new WeakSet()
 
 /**
  * Resolve `maxWriters`. Omitted values default to 2; invalid limits fail closed.
@@ -83,12 +85,11 @@ function omitProtectedPaths(text, paths) {
   return next
 }
 
-function rewritePrompt(prompt, paths) {
-  if (!Array.isArray(prompt) || paths.length === 0) return prompt
-  return prompt.map((block) => {
-    if (block?.type !== 'text') return block
-    return { ...block, text: omitProtectedPaths(block.text, paths) }
-  })
+function sanitizeToolArguments(args, paths) {
+  if (paths.length === 0 || args == null || typeof args !== 'object') return args
+  const value = args
+  if (isResearcherSpec({ label: value.description, prompt: value.prompt })) return args
+  return { ...value, prompt: omitProtectedPaths(value.prompt, paths) }
 }
 
 function protectedPathsOf(session) {
@@ -245,18 +246,18 @@ export class MultitaskGuardrails extends Service {
     }
   }
 
-  sanitizeSpec(spec, paths) {
-    if (isResearcherSpec(spec) || paths.length === 0) return spec
-    if (spec?.request != null) {
-      return {
-        ...spec,
-        request: {
-          ...spec.request,
-          prompt: rewritePrompt(spec.request.prompt, paths)
-        }
-      }
-    }
-    return { ...spec, prompt: rewritePrompt(spec.prompt, paths) }
+  queueLaterHandoff(agent, task) {
+    const alreadyQueued = [...agent.inbox.nextTurn, ...agent.inbox.nextStep]
+      .some(message => message.source?.kind === 'multitask' && message.source.taskId === task.id)
+    if (alreadyQueued) return
+    const message = createUserMessage({
+      content: renderHandoffPrompt(task, effectiveClaims(agent.session), {
+        capacity: this.capacitySnapshot(agent),
+        protectedPaths: this.protectedPaths(agent)
+      }),
+      source: { kind: 'multitask', taskId: task.id }
+    })
+    agent.inbox.prepend('next-turn', message)
   }
 
   async onPreExecute(exec, next) {
@@ -268,7 +269,13 @@ export class MultitaskGuardrails extends Service {
     const active = await this.activeWriterCount(agent)
     if (active >= this.maxWriters) {
       const task = latestTask(agent.session)
-      if (task != null) this.driver?.queueLaterRound?.(agent, task)
+      if (task != null) {
+        const queued = this.driver?.queueLaterRound?.(agent, task)
+        if (queued?.reason === 'yield' || queued?.reason === 'wake-bound') {
+          if (agent.status === 'idle') this.queueLaterHandoff(agent, task)
+          else this.driver?.queueHandoff?.(agent, task)
+        }
+      }
       return {
         kind: 'deny',
         reason: formatWriterCapRefusal({
@@ -291,6 +298,20 @@ export class MultitaskGuardrails extends Service {
   }
 
   ensureWrapped() {
+    const tools = this.ctx.get?.('tools')
+    if (tools != null && !wrappedToolRuntimes.has(tools)) {
+      wrappedToolRuntimes.add(tools)
+      const originalExecute = tools.execute.bind(tools)
+      const self = this
+      tools.execute = async (input) => {
+        if (input?.name !== WRITER_TOOL_NAME || input.agent == null) return originalExecute(input)
+        const paths = self.protectedPaths(input.agent)
+        return originalExecute({
+          ...input,
+          arguments: sanitizeToolArguments(input.arguments, paths)
+        })
+      }
+    }
     const subagents = this.ctx.get?.('subagents')
     if (subagents == null || wrappedRuntimes.has(subagents)) return
     wrappedRuntimes.add(subagents)
@@ -300,9 +321,8 @@ export class MultitaskGuardrails extends Service {
     subagents.startContinuable = async (spec) => {
       const parentId = String(spec?.request?.parent?.session?.id ?? spec?.parent?.session?.id ?? '')
       const store = admission.getStore() ?? (parentId.length > 0 ? self.inflightByParent.get(parentId) : undefined)
-      const prepared = self.sanitizeSpec(spec, store?.protectedPaths ?? [])
       try {
-        const result = await originalContinuable(prepared)
+        const result = await originalContinuable(spec)
         if (store != null && !isResearcherSpec(spec)) {
           self.bindChild(store.reservationId, result?.childId)
           if (store.parentId != null) self.inflightByParent.delete(store.parentId)
@@ -318,11 +338,8 @@ export class MultitaskGuardrails extends Service {
     }
     subagents.start = async (provider, request) => {
       const store = admission.getStore()
-      const prepared = store == null || isResearcherSpec({ request, label: request?.label })
-        ? request
-        : { ...request, prompt: rewritePrompt(request.prompt, store.protectedPaths) }
       try {
-        return await originalStart(provider, prepared)
+        return await originalStart(provider, request)
       } catch (error) {
         if (store != null) self.releaseReservation(store.reservationId)
         throw error
