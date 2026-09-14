@@ -100,9 +100,15 @@ interface Fixture {
   disposeAll(): Promise<void>
 }
 
-function formatTaskCardText(task: Record<string, unknown>): string {
+function loadMultitaskClient(): {
+  foldTasks: (events: Array<Record<string, unknown>>) => Array<Record<string, unknown>>
+  formatTaskCardText: (task: Record<string, unknown>) => string
+} {
   const source = readFileSync(path.join(process.cwd(), 'packages/dsh-multitask-client/client.js'), 'utf8')
-  let definition: { factory: (require: (id: string) => unknown) => { formatTaskCardText: (value: Record<string, unknown>) => string } } | undefined
+  let definition: { factory: (require: (id: string) => unknown) => {
+    foldTasks: (events: Array<Record<string, unknown>>) => Array<Record<string, unknown>>
+    formatTaskCardText: (value: Record<string, unknown>) => string
+  } } | undefined
   vm.runInNewContext(source, {
     window: {
       __ModuleLoader__: {
@@ -112,7 +118,7 @@ function formatTaskCardText(task: Record<string, unknown>): string {
       }
     }
   })
-  const plugin = definition!.factory((id: string) => {
+  return definition!.factory((id: string) => {
     if (id === 'react') {
       return {
         createElement: () => ({}),
@@ -122,6 +128,13 @@ function formatTaskCardText(task: Record<string, unknown>): string {
     }
     throw new Error(`unexpected client require ${id}`)
   })
+}
+
+function foldTaskCardFromLiveSession(agent: Agent, taskId: string): string {
+  const plugin = loadMultitaskClient()
+  const folded = plugin.foldTasks(agent.session.snapshotEvents() as unknown as Array<Record<string, unknown>>)
+  const task = folded.find(row => row.id === taskId)
+  if (task === undefined) throw new Error(`live session fold is missing task ${taskId}`)
   return plugin.formatTaskCardText(task)
 }
 
@@ -435,16 +448,10 @@ describe('multitask_claim_enforcement_gate native collision', () => {
     expect(await fileExists(path.join(f.home, 'src/recovered.ts'))).toBe(true)
     expect(denialEvents(f.agent)).toHaveLength(1)
 
-    const card = formatTaskCardText({
-      id: 'MT-2',
-      objective: 'implement shared file B',
-      phase: 'writing',
-      notes: [reason],
-      interventions: 1,
-      failed: false
-    })
+    const card = foldTaskCardFromLiveSession(f.agent, 'MT-2')
     expect(card).toContain('Boundary intervention')
     expect(card).toContain('MT-1')
+    expect(card).toContain('src/held.ts')
     expect(card).toMatch(/Bash writes are not covered by tier 2/i)
     expect(card).not.toMatch(/Bash writes are (guarded|enforced)/i)
 
@@ -668,12 +675,7 @@ describe('multitask_claim_enforcement_gate bash scope', () => {
     })
     expect(shell.isError).toBe(false)
     expect(await fileExists(path.join(f.home, 'held.txt'))).toBe(true)
-    const card = formatTaskCardText({
-      id: 'MT-1',
-      objective: 'implement shared file A',
-      phase: 'writing',
-      failed: false
-    })
+    const card = foldTaskCardFromLiveSession(f.agent, 'MT-1')
     expect(card).toMatch(/Bash writes are not covered by tier 2/i)
     expect(card).toMatch(/native write\/edit/i)
     expect(card).not.toMatch(/heuristic/i)

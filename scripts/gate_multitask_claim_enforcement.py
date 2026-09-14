@@ -12,7 +12,7 @@ It runs, in order, from the repository root:
    real-runtime deny, recovery, handoff table, release-on-settle, and Bash
    scope coverage
 2. ``node scripts/check-multitask-claim-enforcement.mjs`` — real composed
-   two-writer collision/recovery/abort workflow at the same production seam
+   two-writer collision/recovery/success-release workflow at the same production seam
 3. ``npm test``
 4. ``npm run typecheck``
 5. ``npm run build``

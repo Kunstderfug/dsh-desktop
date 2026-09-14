@@ -212,9 +212,9 @@ function recordResearchSettlement(info, driver) {
 
 async function settleChild(ctx, info, driver) {
   try {
-    await releaseSettledOwnerClaims(ctx, info)
-  } finally {
     recordResearchSettlement(info, driver)
+  } finally {
+    await releaseSettledOwnerClaims(ctx, info)
     childParents.delete(String(info.id))
   }
 }
