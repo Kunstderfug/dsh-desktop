@@ -1,7 +1,7 @@
 /**
  * Host half of the [multitask] plugin (issues #3 scaffold + #4 command +
  * #5 researcher + #8 claims registry + #9 claim enforcement + #6 round
- * driver + #7 orchestrator mode).
+ * driver + #7 orchestrator mode + #12 hardening).
  *
  * This package is the permanent mount target of every later multitask
  * ticket. The composed desktop profile loads it through the
@@ -65,7 +65,8 @@ import { registerOrchestratorMode } from './orchestrator-mode.js'
 import {
   RESEARCHER_LABEL,
   buildResearcherStartSpec,
-  mapResearchSettlement
+  mapResearchSettlement,
+  shouldRetryResearch
 } from './researcher.js'
 import {
   latestTask,
@@ -120,6 +121,16 @@ export {
   formatClaimDenial,
   registerClaimsGuard
 } from './claims-guard.js'
+export {
+  RESEARCHER_LABEL,
+  RESEARCH_RETRY_LIMIT,
+  RESEARCHER_DENIED_TOOLS,
+  RESEARCH_REPORT_HEADINGS,
+  countResearchFailures,
+  countResearchLaunches,
+  mapResearchSettlement,
+  shouldRetryResearch
+} from './researcher.js'
 
 /** Stable Cordis plugin name. */
 export const name = 'dsh-multitask'
@@ -206,31 +217,159 @@ function nextTaskId(session) {
 }
 
 /**
+ * Objective text for one minted task, folded from the session log.
+ *
+ * @param session - parent session log.
+ * @param taskId - `MT-n` identity.
+ */
+function taskObjective(session, taskId) {
+  let objective = ''
+  for (const event of session.snapshotEvents()) {
+    if (event.type === 'multitask/task' && String(event.data?.id ?? '') === String(taskId)) {
+      objective = String(event.data?.objective ?? '')
+    }
+  }
+  return objective
+}
+
+/**
+ * Publish one user-visible task failure. The first researcher failure stays
+ * on the log; this card is the terminal, actionable outcome.
+ *
+ * @param session - parent session log.
+ * @param task - `{ id, objective }`.
+ * @param extras - stop reason, note, and optional child id.
+ */
+function publishTaskFailure(session, task, extras = {}) {
+  if (task?.id == null) return
+  session.append('multitask/phase', {
+    id: task.id,
+    objective: task.objective,
+    phase: 'failed',
+    createdAt: new Date().toISOString(),
+    ...extras
+  })
+}
+
+/**
+ * Launch exactly one researcher retry for a recorded first failure.
+ *
+ * @param ctx - host context.
+ * @param pending - original researcher pending record.
+ */
+async function launchResearcherRetry(ctx, pending) {
+  const subagents = ctx.get?.('subagents')
+  if (typeof subagents?.startContinuable !== 'function') {
+    publishTaskFailure(pending.session, pending.task, {
+      reason: 'researcher',
+      stopReason: 'error',
+      note: 'Researcher failed after one retry. Review the stop reason and retry the task.'
+    })
+    return
+  }
+  try {
+    const start = await subagents.startContinuable(buildResearcherStartSpec({
+      parent: pending.agent,
+      objective: pending.task.objective,
+      signal: new AbortController().signal
+    }))
+    const childId = String(start.childId)
+    pending.session.append('multitask/research', {
+      id: pending.task.id,
+      objective: pending.task.objective,
+      phase: 'researching',
+      createdAt: new Date().toISOString(),
+      childId,
+      label: RESEARCHER_LABEL,
+      retry: 1
+    })
+    pendingResearchers.set(childId, pending)
+  } catch {
+    pending.session.append('multitask/research', {
+      id: pending.task.id,
+      objective: pending.task.objective,
+      phase: 'research-failed',
+      createdAt: new Date().toISOString(),
+      label: RESEARCHER_LABEL,
+      stopReason: 'error',
+      retry: 1
+    })
+    publishTaskFailure(pending.session, pending.task, {
+      reason: 'researcher',
+      stopReason: 'error',
+      note: 'Researcher failed after one retry. Review the stop reason and retry the task.'
+    })
+  }
+}
+
+/**
  * Record a researcher settlement on the parent session that owns the child.
  *
+ * When the round driver is mounted, the first failure retries once. The first
+ * `research-failed` row stays in the log so a retry cannot hide it.
+ *
+ * @param ctx - host context.
  * @param info - `subagent/end` payload from SubagentRuntime.
  * @param driver - optional enabled round driver.
  */
-function recordResearchSettlement(info, driver) {
+async function recordResearchSettlement(ctx, info, driver) {
   const childId = String(info.id)
   const pending = pendingResearchers.get(childId)
-  if (pending === undefined) return
+  if (pending === undefined) return false
   pendingResearchers.delete(childId)
+  const phase = mapResearchSettlement(info.stopReason)
   pending.session.append('multitask/research', {
     id: pending.task.id,
     objective: pending.task.objective,
-    phase: mapResearchSettlement(info.stopReason),
+    phase,
     createdAt: new Date().toISOString(),
     childId,
     label: RESEARCHER_LABEL,
     stopReason: info.stopReason
   })
+  if (phase === 'research-failed' && driver != null && shouldRetryResearch(pending.session, pending.task.id)) {
+    await launchResearcherRetry(ctx, pending)
+    return true
+  }
+  if (phase === 'research-failed') {
+    publishTaskFailure(pending.session, pending.task, {
+      reason: 'researcher',
+      stopReason: info.stopReason,
+      note: 'Researcher failed after one retry. Review the stop reason and retry the task.'
+    })
+  }
   driver?.notifySettlement(pending.agent, pending.task)
+  return true
+}
+
+/**
+ * Surface a writer settlement failure as a failure card. Host release of that
+ * owner's claims happens in the settle `finally`.
+ *
+ * @param ctx - host context.
+ * @param info - `subagent/end` payload.
+ */
+function publishWriterFailure(ctx, info) {
+  if (mapResearchSettlement(info.stopReason) === 'researched') return
+  const session = sessionForSettledChild(ctx, info.id)
+  if (session == null) return
+  const owner = String(info.id)
+  const owned = effectiveClaims(session).filter(claim => String(claim.ownerSessionId) === owner)
+  const taskId = owned[0]?.taskId ?? latestTask(session)?.id
+  if (taskId == null) return
+  publishTaskFailure(session, { id: taskId, objective: taskObjective(session, taskId) }, {
+    reason: 'writer',
+    stopReason: info.stopReason,
+    childId: owner,
+    note: 'Writer failed. Claims were released. Review the diff handoff or retry the task.'
+  })
 }
 
 async function settleChild(ctx, info, driver, guardrails) {
+  const wasResearcher = pendingResearchers.has(String(info.id))
   try {
-    recordResearchSettlement(info, driver)
+    const handled = await recordResearchSettlement(ctx, info, driver)
+    if (!wasResearcher && handled !== true) publishWriterFailure(ctx, info)
   } finally {
     guardrails?.releaseChild?.(String(info.id))
     await releaseSettledOwnerClaims(ctx, info)
@@ -371,6 +510,7 @@ export function apply(ctx, config) {
   console.log(STARTUP_LINE)
   KNOWN_SESSION_EVENT_TYPES.add('multitask/task')
   KNOWN_SESSION_EVENT_TYPES.add('multitask/research')
+  KNOWN_SESSION_EVENT_TYPES.add('multitask/phase')
   KNOWN_SESSION_EVENT_TYPES.add('multitask/claims')
   KNOWN_SESSION_EVENT_TYPES.add('multitask/denial')
   KNOWN_SESSION_EVENT_TYPES.add('multitask/mode')

@@ -63,6 +63,31 @@ declare module '@deepseek-ai/dsh-session/types' {
             label: string
             /** Settlement reason when the researcher reached a terminal phase. */
             stopReason?: MultitaskResearchStopReason
+            /** `1` when this launch is the orchestrator's one allowed retry. */
+            retry?: number
+        }
+        /**
+         * Terminal or intermediate task phase published by the host. Writer
+         * failure and retry-exhausted researcher failure append `phase: 'failed'`
+         * with an actionable note for the task card / paired-phone surface.
+         */
+        'multitask/phase': {
+            /** The parent task id, `MT-<n>`. */
+            id: string
+            /** The verbatim, trimmed objective text. */
+            objective: string
+            /** Lifecycle phase recorded by this append. */
+            phase: 'orchestrating' | 'writing' | 'verifying' | 'done' | 'failed'
+            /** ISO-8601 timestamp of this append. */
+            createdAt: string
+            /** Durable child id when a writer or researcher produced this phase. */
+            childId?: string
+            /** Settlement reason when this phase is a failure. */
+            stopReason?: MultitaskResearchStopReason
+            /** Actionable user-visible failure note. */
+            note?: string
+            /** Failure owner: `researcher` or `writer`. */
+            reason?: string
         }
         /**
          * One claim-enforcement denial. Log-only; folded into the task card as a
@@ -203,3 +228,13 @@ export {
   orchestratorModeProjectionDefinition,
   registerOrchestratorMode
 } from './orchestrator-mode.js'
+export {
+  RESEARCHER_LABEL,
+  RESEARCH_RETRY_LIMIT,
+  RESEARCHER_DENIED_TOOLS,
+  RESEARCH_REPORT_HEADINGS,
+  countResearchFailures,
+  countResearchLaunches,
+  mapResearchSettlement,
+  shouldRetryResearch
+} from './researcher.js'

@@ -31,6 +31,54 @@ export const RESEARCHER_PERSONA = [
   'You must not modify workspace files.'
 ].join(' ')
 
+/** Orchestrator retries a failed researcher this many times, then surfaces failure. */
+export const RESEARCH_RETRY_LIMIT = 1
+
+/**
+ * Count researcher launches recorded for one task.
+ *
+ * @param session - parent session log.
+ * @param taskId - `MT-n` identity.
+ */
+export function countResearchLaunches(session, taskId) {
+  let count = 0
+  const id = String(taskId)
+  for (const event of session.snapshotEvents()) {
+    if (event.type !== 'multitask/research') continue
+    if (String(event.data?.id ?? '') !== id) continue
+    if (event.data?.phase === 'researching') count += 1
+  }
+  return count
+}
+
+/**
+ * Count recorded researcher failures for one task.
+ *
+ * @param session - parent session log.
+ * @param taskId - `MT-n` identity.
+ */
+export function countResearchFailures(session, taskId) {
+  let count = 0
+  const id = String(taskId)
+  for (const event of session.snapshotEvents()) {
+    if (event.type !== 'multitask/research') continue
+    if (String(event.data?.id ?? '') !== id) continue
+    if (event.data?.phase === 'research-failed') count += 1
+  }
+  return count
+}
+
+/**
+ * Whether the first researcher failure still deserves exactly one retry.
+ *
+ * @param session - parent session log.
+ * @param taskId - `MT-n` identity.
+ */
+export function shouldRetryResearch(session, taskId) {
+  return countResearchLaunches(session, taskId) === 1
+    && countResearchFailures(session, taskId) >= 1
+}
+
 /**
  * Build the system-owned research brief.
  *

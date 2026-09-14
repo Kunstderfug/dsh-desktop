@@ -6,7 +6,7 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { ContinuableStartSpec, SubagentStopReason } from '@deepseek-ai/dsh-subagent'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
 
@@ -27,6 +27,18 @@ export declare const RESEARCH_REPORT_HEADINGS: readonly [
 
 /** Role persona installed on the child. */
 export declare const RESEARCHER_PERSONA: string
+
+/** Orchestrator retries a failed researcher this many times, then surfaces failure. */
+export declare const RESEARCH_RETRY_LIMIT: 1
+
+/** Count researcher launches recorded for one task. */
+export declare function countResearchLaunches(session: Session, taskId: string): number
+
+/** Count recorded researcher failures for one task. */
+export declare function countResearchFailures(session: Session, taskId: string): number
+
+/** Whether the first researcher failure still deserves exactly one retry. */
+export declare function shouldRetryResearch(session: Session, taskId: string): boolean
 
 /** Build the system-owned research brief. */
 export declare function buildResearchBrief(input: {

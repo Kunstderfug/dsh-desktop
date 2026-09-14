@@ -144,6 +144,14 @@ window.__ModuleLoader__.load({
         if (typeof data.childId === 'string' && data.childId !== '' && !task.childIds.includes(data.childId)) {
           task.childIds.push(data.childId)
         }
+        const note = typeof data.note === 'string' && data.note !== ''
+          ? data.note
+          : (typeof data.reason === 'string' && data.reason !== '' && data.reason !== 'researcher' && data.reason !== 'writer'
+            ? data.reason
+            : '')
+        if (note !== '' && !(task.notes ?? []).includes(note)) {
+          task.notes = [...(task.notes ?? []), note]
+        }
       }
       return task
     }
@@ -176,7 +184,9 @@ window.__ModuleLoader__.load({
       const children = task.childIds ?? []
       const notes = (task.notes ?? []).map((note) => {
         const text = String(note)
-        return text.startsWith('Boundary intervention:') ? text : `Boundary intervention: ${text}`
+        if (text.startsWith('Boundary intervention:')) return text
+        if (/fail/i.test(text)) return text
+        return `Boundary intervention: ${text}`
       })
       return [
         `Task ${task.id}`,
