@@ -41,9 +41,9 @@ const EPOCH = Date.now()
 const OBJECTIVE_OK = `task card success lifecycle ${EPOCH}`
 const OBJECTIVE_FAIL = `task card failure lifecycle ${EPOCH}`
 const CLAIM_PATH = `src/task-card-gate-${EPOCH}.ts`
-const CLAIM_PROMPT = [
-  `The session already has an open multitask task.`,
-  `Call claim_files exactly once with paths: ["${CLAIM_PATH}"].`,
+const claimPrompt = (taskId) => [
+  `The session already has an open multitask task ${taskId}.`,
+  `Call claim_files exactly once with paths: ["${CLAIM_PATH}"] and taskId: "${taskId}".`,
   `Do not write files. After the tool returns, reply exactly "claim probe complete ${EPOCH}".`
 ].join(' ')
 const BUSY_PROMPT = `Use the terminal once to run "sleep 20". After it completes, reply exactly "busy-turn probe complete ${EPOCH}".`
@@ -635,17 +635,20 @@ try {
       if (card?.phase) seenPhases.add(card.phase)
       if (card === undefined) return false
       assertChipRail(card)
-      return card.failed || card.phase === 'failed' || card.chips.some((chip) => chip.phase === 'failed')
+      return card.failed === true && card.phase === 'failed'
         ? card
         : false
     },
-    'the failure chip/state to be present on the second card',
+    'the second keyed card to reach its current terminal failed phase',
     CARD_DEADLINE_MS
   )
+  if (failedOrLive.phase !== 'failed' || failedOrLive.failed !== true) {
+    fail(`failure card did not reach its current terminal phase: ${JSON.stringify(failedOrLive)}`)
+  }
   if (!failedOrLive.chips.some((chip) => chip.phase === 'failed')) {
     fail('failure phase is hidden from the card chip rail')
   }
-  log(`check-multitask-task-card: failure identity preserved on ${cardFail.id} (phase ${failedOrLive.phase}, failed=${failedOrLive.failed})`)
+  log(`check-multitask-task-card: failure identity preserved on ${cardFail.id} (current phase ${failedOrLive.phase}, failed=${failedOrLive.failed})`)
 
   const lineage = await pageCall(endpoint, 'lineage')
   if (lineage !== null) {
@@ -685,36 +688,6 @@ try {
   )
   log(`check-multitask-task-card: queue labels distinguished handoff vs user (${labels.length} labeled rows)`)
 
-  await callCdp(endpoint, 'Emulation.setDeviceMetricsOverride', {
-    width: 390,
-    height: 844,
-    deviceScaleFactor: 2,
-    mobile: true
-  })
-  sleep(1_000)
-  await evaluate(endpoint, PAGE_HELPERS)
-  const narrow = await evaluateUntil(
-    endpoint,
-    async () => {
-      const cards = await pageCall(endpoint, 'cards')
-      const card = cards.find((row) => row.id === cardOk.id)
-      return card?.narrow === true ? card : false
-    },
-    'the success card to degrade to narrow text',
-    CARD_DEADLINE_MS
-  )
-  for (const token of [cardOk.id, OBJECTIVE_OK, narrow.phase]) {
-    if (!narrow.text.includes(String(token))) {
-      fail(`narrow text is missing ${token}: ${JSON.stringify(narrow.text.slice(0, 400))}`)
-    }
-  }
-  if (narrow.text.includes('[data-') || /<button/i.test(narrow.text)) {
-    fail('narrow surface still depends on interactive chrome')
-  }
-  log(`check-multitask-task-card: narrow text card readable (phase ${narrow.phase})`)
-
-  await callCdp(endpoint, 'Emulation.clearDeviceMetricsOverride', {})
-  sleep(400)
   await evaluateUntil(
     endpoint,
     async () => !(await pageCall(endpoint, 'turnRunning')),
@@ -722,7 +695,7 @@ try {
     RENDERER_DEADLINE_MS
   )
 
-  await typeLine(endpoint, CLAIM_PROMPT)
+  await typeLine(endpoint, claimPrompt(cardOk.id))
   await pressEnter(endpoint)
   let claimBadge
   try {
@@ -743,6 +716,40 @@ try {
     log('check-multitask-task-card: claim prompt did not add a new path; using live projection badges already on tool presenters')
   }
   log(`check-multitask-task-card: claim badge rendered for ${claimBadge.path} task=${claimBadge.taskId}`)
+  if (claimBadge.taskId !== cardOk.id) {
+    fail(`claim badge targeted ${claimBadge.taskId}, expected the keyed success card ${cardOk.id}`)
+  }
+
+  await callCdp(endpoint, 'Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  })
+  sleep(1_000)
+  await evaluate(endpoint, PAGE_HELPERS)
+  const narrow = await evaluateUntil(
+    endpoint,
+    async () => {
+      const cards = await pageCall(endpoint, 'cards')
+      const card = cards.find((row) => row.id === cardOk.id)
+      return card?.narrow === true ? card : false
+    },
+    'the claimed success card to degrade to narrow text',
+    CARD_DEADLINE_MS
+  )
+  for (const token of [cardOk.id, OBJECTIVE_OK, narrow.phase, claimBadge.path, claimBadge.taskId]) {
+    if (!narrow.text.includes(String(token))) {
+      fail(`narrow text is missing ${token}: ${JSON.stringify(narrow.text.slice(0, 400))}`)
+    }
+  }
+  if (narrow.text.includes('[data-') || /<button/i.test(narrow.text)) {
+    fail('narrow surface still depends on interactive chrome')
+  }
+  log(`check-multitask-task-card: narrow text card readable with claim ${claimBadge.path} (phase ${narrow.phase})`)
+
+  await callCdp(endpoint, 'Emulation.clearDeviceMetricsOverride', {})
+  sleep(400)
 
   const liveLog = findScenarioLog(startedAt)
   if (liveLog !== undefined) {
