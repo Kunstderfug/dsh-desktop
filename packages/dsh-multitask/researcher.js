@@ -98,9 +98,23 @@ export function buildResearchBrief({ objective, workspace }) {
   ].join('\n')
 }
 
-/** The child `toolFilter` deny list for mutation tools. */
-export function researcherToolFilter() {
-  return { deny: [...RESEARCHER_DENIED_TOOLS] }
+/**
+ * The child `toolFilter` for one researcher child.
+ *
+ * Deny names are intersected with the tools the deployment actually knows:
+ * `tools.restrict()` rejects unknown names loud, so a hard-coded alias such
+ * as `str_replace_editor` (absent in deployments without the Anthropic-style
+ * toolset) fails the whole child materialization. The brief's prompt-level
+ * denial still covers any alias the filter had to drop.
+ *
+ * @param knownTools - optional set of tool names the deployment knows.
+ * @returns the `toolFilter` deny list.
+ */
+export function researcherToolFilter(knownTools) {
+  const deny = typeof knownTools?.has === 'function'
+    ? RESEARCHER_DENIED_TOOLS.filter(name => knownTools.has(name))
+    : [...RESEARCHER_DENIED_TOOLS]
+  return { deny }
 }
 
 /**
@@ -120,8 +134,9 @@ export function mapResearchSettlement(stopReason) {
  * @param input.parent - receiving parent agent.
  * @param input.objective - trimmed task objective packed into the brief.
  * @param input.signal - caller cancellation until inbox acceptance.
+ * @param input.knownTools - optional known tool names for the deny filter.
  */
-export function buildResearcherStartSpec({ parent, objective, signal }) {
+export function buildResearcherStartSpec({ parent, objective, signal, knownTools }) {
   const workspace = parent.session.header.cwd ?? process.cwd()
   return {
     provider: 'spawn',
@@ -130,7 +145,7 @@ export function buildResearcherStartSpec({ parent, objective, signal }) {
       prompt: [{ type: 'text', text: buildResearchBrief({ objective, workspace }) }],
       parent,
       persona: RESEARCHER_PERSONA,
-      toolFilter: researcherToolFilter()
+      toolFilter: researcherToolFilter(knownTools)
     },
     signal
   }

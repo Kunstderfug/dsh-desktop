@@ -257,6 +257,27 @@ function publishTaskFailure(session, task, extras = {}) {
  * @param ctx - host context.
  * @param pending - original researcher pending record.
  */
+/**
+ * Enumerate the tool names the deployment knows, for deny-filter filtering.
+ *
+ * `tools.restrict()` rejects unknown names, so the researcher deny list must
+ * never carry an alias this composition lacks. Any failure to enumerate keeps
+ * the historical full list (fail loud as before, not silently unguarded).
+ *
+ * @param ctx - host context exposing `tools`.
+ * @param agent - the parent agent whose view anchors the enumeration.
+ * @returns known restrictable tool names, or undefined when unresolvable.
+ */
+function knownToolNames(ctx, agent) {
+  const tools = ctx.get?.('tools')
+  if (typeof tools?.view !== 'function') return undefined
+  try {
+    return tools.view(agent).restrictableNames
+  } catch {
+    return undefined
+  }
+}
+
 async function launchResearcherRetry(ctx, pending) {
   const subagents = ctx.get?.('subagents')
   if (typeof subagents?.startContinuable !== 'function') {
@@ -271,6 +292,7 @@ async function launchResearcherRetry(ctx, pending) {
     const start = await subagents.startContinuable(buildResearcherStartSpec({
       parent: pending.agent,
       objective: pending.task.objective,
+      knownTools: knownToolNames(ctx, pending.agent),
       signal: new AbortController().signal
     }))
     const childId = String(start.childId)
@@ -284,7 +306,8 @@ async function launchResearcherRetry(ctx, pending) {
       retry: 1
     })
     pendingResearchers.set(childId, pending)
-  } catch {
+  } catch (error) {
+    console.error('[multitask] researcher retry launch failed:', error && error.stack ? error.stack : error)
     pending.session.append('multitask/research', {
       id: pending.task.id,
       objective: pending.task.objective,
@@ -438,6 +461,7 @@ async function executeMultitaskCommand(ctx, invocation, driver, mode) {
       const start = await subagents.startContinuable(buildResearcherStartSpec({
         parent: invocation.agent,
         objective,
+        knownTools: knownToolNames(ctx, invocation.agent),
         signal: invocation.signal
       }))
       const childId = String(start.childId)
@@ -455,7 +479,8 @@ async function executeMultitaskCommand(ctx, invocation, driver, mode) {
         task
       })
       researcherLine = `Researcher ${childId} (${RESEARCHER_LABEL}) launched; research phase: researching.`
-    } catch {
+    } catch (error) {
+      console.error('[multitask] researcher launch failed:', error && error.stack ? error.stack : error)
       invocation.agent.session.append('multitask/research', {
         id: task.id,
         objective,
