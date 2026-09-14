@@ -48,6 +48,7 @@ interface LoadedClient {
     foldTasks: (events: Array<Record<string, unknown>>) => unknown[]
     displayPhase: (phase: string) => string
     queueRowKind: (text: string) => string
+    queueRowPreview: (row: Record<string, unknown>) => string
     claimBadgeForPath: (
       path: string,
       claims: Array<Record<string, unknown>>
@@ -295,6 +296,61 @@ describe('multitask task-card fold', () => {
     expect(plugin.queueRowKind('Orchestrator handoff for MT-3: continue research')).toBe('orchestrator-handoff')
     expect(plugin.queueRowKind('please review the diff')).toBe('user')
     expect(plugin.extractTaskId('Multitask task MT-12 queued.')).toBe('MT-12')
+  })
+
+  it('previews queue rows from echoes, text, or message content blocks', async () => {
+    const { plugin } = await loadClient()
+    expect(plugin.queueRowPreview({ text: 'echo text' })).toBe('echo text')
+    expect(plugin.queueRowPreview({ preview: 'handoff preview' })).toBe('handoff preview')
+    expect(plugin.queueRowPreview({ message: { content: [{ type: 'text', text: 'first' }, { type: 'image' }, { type: 'text', text: 'second' }] } })).toBe('first second')
+    expect(plugin.queueRowPreview({})).toBe('')
+  })
+
+  function queueRailComponent(registrations: SlotRegistration[]) {
+    const rail = registrations.find((row) => row.options.id === 'dsh-multitask-queue-label')
+    if (rail === undefined) throw new Error('queue label rail is not registered')
+    return rail.component
+  }
+
+  function railText(element: unknown): string {
+    if (element === null || element === undefined) return ''
+    if (typeof element === 'string') return element
+    const node = element as { props?: Record<string, unknown>; children?: unknown[] }
+    const own = typeof node.props?.children === 'string' ? node.props.children : ''
+    const kids = Array.isArray(node.children)
+      ? node.children
+      : Array.isArray(node.props?.children)
+        ? node.props.children as unknown[]
+        : []
+    return [own, ...kids.map((kid) => railText(kid))].filter(Boolean).join(' ')
+  }
+
+  it('hides stale queue rows and echoes once the session goes idle', async () => {
+    const { plugin } = await loadClient()
+    const { registrations } = applyClient(plugin)
+    const rail = queueRailComponent(registrations)
+    const staleEcho = { requestId: 'rpc-1', placement: 'queued', text: 'commit and rebuild when done' }
+    const staleMirrorRow = { id: 'msg-1', placement: 'queued', rpcId: 'rpc-1', message: { id: 'msg-1', content: [{ type: 'text', text: 'commit and rebuild when done' }] } }
+    expect(rail({ session: { queue: [], pendingSubmissions: [staleEcho], running: false } })).toBeNull()
+    expect(rail({ session: { queue: [staleMirrorRow], pendingSubmissions: [], running: false } })).toBeNull()
+    expect(rail({ session: { queue: [staleMirrorRow], pendingSubmissions: [staleEcho], running: false } })).toBeNull()
+  })
+
+  it('renders live queued rows and admitted-echo dedupe while the session runs', async () => {
+    const { plugin } = await loadClient()
+    const { registrations } = applyClient(plugin)
+    const rail = queueRailComponent(registrations)
+    const pending = { requestId: 'rpc-2', placement: 'queued', text: 'please review the diff' }
+    const live = rail({ session: { queue: [], pendingSubmissions: [pending], running: true } }) as { children: unknown[] }
+    expect(railText(live)).toContain('Queued message: please review the diff')
+
+    const admitted = { id: 'msg-2', placement: 'queued', rpcId: 'rpc-2', message: { id: 'msg-2', content: [{ type: 'text', text: 'Orchestrator handoff for MT-3: continue research' }] } }
+    const deduped = rail({ session: { queue: [admitted], pendingSubmissions: [pending], running: true } }) as { children: unknown[] }
+    expect(railText(deduped)).toContain('Orchestrator handoff for MT-3: continue research')
+    expect(railText(deduped)).not.toContain('please review the diff')
+
+    expect(rail({ session: { queue: [], pendingSubmissions: [], running: true } })).toBeNull()
+    expect(rail({ session: { queue: [], pendingSubmissions: [pending] } })).not.toBeNull()
   })
 
   it('badges claimed paths by normalized path, task, and owner', async () => {

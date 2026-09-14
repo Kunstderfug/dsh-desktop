@@ -444,13 +444,33 @@ window.__ModuleLoader__.load({
       return null
     }
 
+    function queueRowPreview(row) {
+      if (typeof row?.preview === 'string') return row.preview
+      if (typeof row?.text === 'string') return row.text
+      const content = row?.message?.content
+      if (Array.isArray(content)) {
+        const parts = []
+        for (const block of content) {
+          if (block?.type === 'text' && typeof block.text === 'string') parts.push(block.text)
+        }
+        return parts.join(' ')
+      }
+      return ''
+    }
+
     function QueueLabelRail({ useInput, session }) {
       const input = typeof useInput === 'function' ? useInput((state) => state) : undefined
       const snapshot = session ?? input
-      const rows = [
-        ...(snapshot?.queue ?? []),
-        ...(snapshot?.pendingSubmissions ?? []).filter((row) => row.placement === 'queued')
-      ]
+      const queue = snapshot?.queue ?? []
+      const admitted = new Set(queue.flatMap((row) => (row.rpcId === undefined ? [] : [row.rpcId])))
+      const pending = (snapshot?.pendingSubmissions ?? []).filter((row) => (
+        row.placement === 'queued' && !admitted.has(row.requestId)
+      ))
+      // An idle session has a drained inbox: a queue row or an unretired
+      // submission echo at rest is stale client state, and rendering it kept
+      // the "Queued message: …" label pinned after the message was delivered.
+      if (snapshot?.running === false) return null
+      const rows = [...queue, ...pending]
       if (rows.length === 0) return null
       return React.createElement(
         'div',
@@ -459,7 +479,7 @@ window.__ModuleLoader__.load({
           style: { display: 'flex', flexDirection: 'column', gap: '4px', margin: '0 0 6px', fontSize: '11px' }
         },
         ...rows.map((row, index) => {
-          const preview = String(row.preview ?? row.text ?? '')
+          const preview = queueRowPreview(row)
           const kind = queueRowKind(preview)
           return React.createElement(
             'div',
@@ -626,6 +646,7 @@ window.__ModuleLoader__.load({
     exports.foldTasks = foldTasks
     exports.displayPhase = displayPhase
     exports.queueRowKind = queueRowKind
+    exports.queueRowPreview = queueRowPreview
     exports.claimBadgeForPath = claimBadgeForPath
     exports.formatTaskCardText = formatTaskCardText
     exports.extractTaskId = extractTaskId
