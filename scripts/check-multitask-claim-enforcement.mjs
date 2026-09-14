@@ -8,9 +8,9 @@
 // session event log/projections, round-driver handoff, and task-card text.
 // Only the model adapter is scripted, matching the frozen
 // `multitask_claim_enforcement_gate` seam. The script asserts full history —
-// one actionable denial, recovery, live claim table, host release-on-settle
-// before retry, no double-deny, and the Bash tier-2 footnote — not a helper
-// call or a final-state snapshot.
+// one actionable denial, recovery, live claim table, host release after holder
+// success before retry, no double-deny, and the Bash tier-2 footnote folded
+// from live session events — not a helper call or a final-state snapshot.
 //
 // Exit 0 only when every observation succeeded.
 
@@ -49,7 +49,7 @@ const REMEDY = 'ask the orchestrator or claim a different path'
 const STRUCTURED_REPORT = [
   'Goal: claim enforcement composed scenario',
   'Affected paths: src/held.ts',
-  'Implementation plan: collide, recover, abort, retry',
+  'Implementation plan: collide, recover, complete, retry',
   'Risks: leaked claims and double-deny',
   'Recommended claim set: src/held.ts'
 ].join('\n')
@@ -98,8 +98,12 @@ function isResearcherCall(call) {
     || text.includes('structured research report')
 }
 
-function isWriterCall(call) {
-  return userText(call.request).includes('stays live to claim files')
+function isWriterACall(call) {
+  return userText(call.request).includes('writer A stays live to claim files')
+}
+
+function isWriterBCall(call) {
+  return userText(call.request).includes('writer B stays live to claim files')
 }
 
 function gate() {
@@ -192,7 +196,7 @@ function handoffText(agent) {
     .join('\n')
 }
 
-function formatTaskCardText(task) {
+function loadMultitaskClient() {
   const source = readFileSync(new URL('../packages/dsh-multitask-client/client.js', import.meta.url), 'utf8')
   let definition
   vm.runInNewContext(source, {
@@ -204,7 +208,7 @@ function formatTaskCardText(task) {
       }
     }
   })
-  const plugin = definition.factory((id) => {
+  return definition.factory((id) => {
     if (id === 'react') {
       return {
         createElement: () => ({}),
@@ -214,6 +218,13 @@ function formatTaskCardText(task) {
     }
     throw new Error(`unexpected client require ${id}`)
   })
+}
+
+function foldTaskCardFromLiveSession(agent, taskId) {
+  const plugin = loadMultitaskClient()
+  const folded = plugin.foldTasks(agent.session.snapshotEvents())
+  const task = folded.find((row) => row.id === taskId)
+  if (task === undefined) fail(`live session fold is missing task ${taskId}`)
   return plugin.formatTaskCardText(task)
 }
 
@@ -351,19 +362,28 @@ async function launchTwoHeldChildren(app, hold) {
 }
 
 async function runScenario() {
-  const hold = gate()
+  const holdA = gate()
+  const holdB = gate()
+  const ends = new Map()
   const app = await compose({
     respond: async (call) => {
-      if (isWriterCall(call)) {
-        await holdUntil(call.request.signal, hold.promise)
-        return 'writer held'
+      if (isWriterACall(call)) {
+        await holdUntil(call.request.signal, holdA.promise)
+        return 'writer A completed'
+      }
+      if (isWriterBCall(call)) {
+        await holdUntil(call.request.signal, holdB.promise)
+        return 'writer B held'
       }
       if (isResearcherCall(call)) return STRUCTURED_REPORT
       return 'parent ack'
     }
   })
+  app.ctx.on('subagent/end', (info) => {
+    ends.set(String(info.id), String(info.stopReason ?? ''))
+  })
   try {
-    const { childA, childB, childIds } = await launchTwoHeldChildren(app, hold)
+    const { childA, childB, childIds } = await launchTwoHeldChildren(app, holdA)
     const preclaimed = liveClaimTable(app.agent)
     if (!preclaimed.some((claim) => String(claim.path).includes('parent-busy.ts') && claim.taskId === 'MT-1')) {
       fail('busy-parent touched path was not pre-claimed when /multitask minted MT-2')
@@ -421,16 +441,9 @@ async function runScenario() {
     if (!edit.isError) fail('writer B native edit on a foreign-claimed path was not denied')
     if (denialEvents(app.agent).length !== 2) fail(`edit must add exactly one more denial, got ${denialEvents(app.agent).length}`)
 
-    const card = formatTaskCardText({
-      id: 'MT-2',
-      objective: 'implement shared file B',
-      phase: 'writing',
-      notes: [reason],
-      interventions: 1,
-      failed: false
-    })
-    if (!card.includes('Boundary intervention') || !card.includes('MT-1')) {
-      fail('task card is missing the boundary-intervention note')
+    const card = foldTaskCardFromLiveSession(app.agent, 'MT-2')
+    if (!card.includes('Boundary intervention') || !card.includes('MT-1') || !card.includes('src/held.ts')) {
+      fail('task card is missing the boundary-intervention note from the live denial')
     }
     if (!/Bash writes are not covered by tier 2/i.test(card) || !/native write\/edit/i.test(card)) {
       fail('task card is missing the Bash tier-2 footnote')
@@ -439,19 +452,32 @@ async function runScenario() {
       fail('task card claims Bash is enforced or uses a heuristic')
     }
 
-    await app.ctx.subagents.drainContinuableChildren(app.agent, [SessionId(childIds[0])])
-    await waitFor(() => !liveClaimTable(app.agent).some((claim) => claim.path === 'src/held.ts'), 'holder claims released after abort')
+    holdA.open()
+    await waitFor(() => ends.get(childIds[0]) === 'completed', 'holder settled as completed')
+    await waitFor(
+      () => !liveClaimTable(app.agent).some((claim) => claim.path === 'src/held.ts'),
+      'holder claims released after success'
+    )
+    if (!claimEvents(app.agent).some((event) => event.path === 'src/held.ts' && event.state === 'released')) {
+      fail('host did not append a released claim after holder success')
+    }
+    if (!liveClaimTable(app.agent).some((claim) => String(claim.path).includes('parent-busy.ts') && claim.taskId === 'MT-1')) {
+      fail('unrelated live claim was released with the holder')
+    }
     const reread = await runTool(app.ctx, childB, 'read', {
       file_path: path.join(app.home, 'src/held.ts')
     })
     if (reread.isError) fail(`retry read after host release failed: ${reread.error?.message}`)
     const retry = await runTool(app.ctx, childB, 'write', {
       file_path: path.join(app.home, 'src/held.ts'),
-      content: 'retry after abort'
+      content: 'retry after completed'
     })
-    if (retry.isError) fail(`retry after host release failed: ${retry.error?.message}`)
-    if (await readFile(path.join(app.home, 'src/held.ts'), 'utf8') !== 'retry after abort') {
-      fail('retry after abort did not land')
+    if (retry.isError) fail(`retry after host success release failed: ${retry.error?.message}`)
+    if (await readFile(path.join(app.home, 'src/held.ts'), 'utf8') !== 'retry after completed') {
+      fail('retry after holder success did not land')
+    }
+    if (!liveClaimTable(app.agent).some((claim) => String(claim.path).includes('parent-busy.ts') && claim.taskId === 'MT-1')) {
+      fail('unrelated live claim disappeared after the retry')
     }
 
     const other = await compose({ sessionId: 'session-other' })
@@ -466,11 +492,12 @@ async function runScenario() {
       await other.dispose()
     }
 
-    hold.open()
+    holdB.open()
     await app.agent.whenIdle()
-    log('check-multitask-claim-enforcement: PASS collision, recovery, table, release, bash scope')
+    log('check-multitask-claim-enforcement: PASS collision, recovery, table, success release, bash scope')
   } finally {
-    hold.open()
+    holdA.open()
+    holdB.open()
     await app.dispose().catch(() => {})
   }
 }
