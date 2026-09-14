@@ -1,7 +1,22 @@
 # Multitask / Orchestrator Mode — Research & Design Proposal
 
 Date: 2026-09-13
-Status: research draft, pending review
+Status: implemented
+
+Landed through GitHub issues #3–#12 on base `3c8c0f0855f33aaa120eaa818616cffc3f8d2628`. User guide: [`docs/multitask.md`](../../multitask.md). Phase 0 spike notes from #1 and #2 remain as separate files; see Appendix A.
+
+| Issue | Commit | Summary |
+| --- | --- | --- |
+| #3 | `102a8fcd3b73ed97f49c058081c0e82b2d977b4b` | scaffold `dsh-multitask` plugin pair + desktop mount |
+| #4 | `a127b087e61e3c7e16227ee22e37d31db73b2f86` | `/multitask` command handler + `multitask/task` events |
+| #5 | `f67331f5c9bfadf36e0ff21e33a1032bf960a75c` | continuable researcher with `toolFilter` and settlement phases |
+| #6 | `9691a7b566f9479cdf12888b29eb47df9b85c009` | race-fenced same-session round driver |
+| #7 | `4a67fb6eb332e49c6ff4c383c00fbcf1b051aeb4` | per-agent orchestrator mode from the session log |
+| #8 | `d7002964f93ae4a84832d4ec71d815292fc0bfe5` | log-backed claims registry and scoped claim tools |
+| #9 | `c2646ea509e50c1f4e6bfee9f73fcb4082f96921` | file-claim enforcement at the tool boundary + release on settle |
+| #10 | `24b71e600fbc2196ada7d3c6326de8fa971ac6e4` | writer cap, shared wake bound, busy-parent brief guards |
+| #11 | `5963df78f5a15534633bb7e29666c1c836de8cac` | keyed task-card chat node and claim badges |
+| #12 | `3c8c0f0855f33aaa120eaa818616cffc3f8d2628` | resume/fork hardening, failure cards, and abuse paths |
 
 ## 1. Goal (restated)
 
@@ -452,3 +467,11 @@ Phased so each step lands on an existing seam and is independently verifiable.
 - Pinned harness packages: `node_modules/@deepseek-ai/*@0.1.5-rc.2` (see §8 evidence index for exact files/symbols)
 - `docs/architecture.md`, `docs/development.md`, `docs/harness-0.1.5-patch-refactor.md`, `docs/plugin-management.zh.md`
 - `packages/dsh-desktop-client-ui/`, `build/dsh-desktop.patch.yml`, `scripts/build-ppt-runtime.mjs`
+- User guide (issue #13): [`docs/multitask.md`](../../multitask.md)
+
+## Appendix A — Phase 0 spike notes
+
+The Phase 0 spikes from issues #1 and #2 stay as the existing notes; they are not folded into the body of this spec.
+
+- Runtime composition (issue #1): [2026-09-13-multitask-spike-runtime.md](./2026-09-13-multitask-spike-runtime.md)
+- Claims enforcement seams (issue #2): [2026-09-13-multitask-spike-claims.md](./2026-09-13-multitask-spike-claims.md)

@@ -52,12 +52,17 @@ DeepSeek Harness already provides the Agent runtime and Web UI. DSH Desktop adds
 - Supports official DeepSeek models and mainstream third-party model providers
 - Imports and exports complete custom Agent presets as portable [`.dshpreset` packages](docs/preset-packages.md), with conflict checks and a trust warning before installation
 - Turns source material into editable PPTX decks through the built-in PPT mode
+- Queues a [`/multitask`](docs/multitask.md) objective without interrupting the running Agent, then researches and implements it under file claims
 - Preserves profiles, plugins, workspaces, sessions, and model settings across app upgrades
 - Detects startup and frontend plugin failures, keeps diagnostics in `harness.log`, and offers guided recovery actions
 - Provides a non-destructive Safe Mode that temporarily blocks third-party plugins
 - Lets a paired phone continue sessions over the local network or an optional temporary public tunnel
 - Checks for desktop updates and keeps download and installation under user control
 - Adapts native menus, titlebar behavior, window focus, theme, and application branding for macOS and Windows
+
+## Multitask
+
+Type `/multitask <objective>` in the session input. The running turn continues; a researcher starts immediately; the same Agent becomes the orchestrator at the next turn boundary and dispatches a writer under exclusive file claims. Parallel writers default to `multitask.maxWriters` = 2. Automatic settlement wakes stop at the shared driver bound of 3. Bash writes are outside today's claim guard; sandbox/worktree isolation is a future tier-3 step. See the [Multitask guide](docs/multitask.md).
 
 ## PPT generation
 
