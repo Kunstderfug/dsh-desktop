@@ -11,6 +11,7 @@
  * @module dsh-multitask
  */
 import type { Context } from '@deepseek-ai/cordis'
+import type { MultitaskRoundDriverConfig } from './round-driver.js'
 
 /** Researcher lifecycle phases published on `multitask/research` events. */
 export type MultitaskResearchPhase = 'researching' | 'researched' | 'research-failed'
@@ -87,11 +88,27 @@ export declare const inject: string[]
 
 /**
  * Log the scaffold startup line, listen for researcher settlement, register
- * claims, and register the `/multitask` command.
+ * claims, optionally install the round driver, and register the `/multitask`
+ * command.
  * @param ctx - Host context.
+ * @param config - optional driver enable flag and wake bound.
  */
-export declare function apply(ctx: Context): void
+export declare function apply(ctx: Context, config?: MultitaskRoundDriverConfig): void
 
+export type {
+  MultitaskHandoffSource,
+  MultitaskRoundDriver,
+  MultitaskRoundDriverConfig,
+  ResolvedRoundDriverConfig
+} from './round-driver.js'
+export {
+  DEFAULT_MAX_CONSECUTIVE_WAKES,
+  isMultitaskHandoffSource,
+  latestTask,
+  registerRoundDriver,
+  renderHandoffPrompt,
+  resolveRoundDriverConfig
+} from './round-driver.js'
 export type {
   MultitaskClaimRecord,
   MultitaskClaimsProjectionState,

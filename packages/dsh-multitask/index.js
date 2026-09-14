@@ -1,6 +1,6 @@
 /**
  * Host half of the [multitask] plugin (issues #3 scaffold + #4 command +
- * #5 researcher + #8 claims registry).
+ * #5 researcher + #8 claims registry + #6 round driver).
  *
  * This package is the permanent mount target of every later multitask
  * ticket. The composed desktop profile loads it through the
@@ -28,10 +28,14 @@
  * - the file-claim registry (issue #8): a log-backed `multitask.claims`
  *   service, a `multitask/claims` projection unit, and agent-scoped
  *   `claim_files` / `release_files` / `list_file_claims` tools. Write/edit
- *   boundary enforcement is issue #9 and is not implemented here.
+ *   boundary enforcement is issue #9 and is not implemented here, and
+ * - the round driver (issue #6): when `enabled: true`, `/multitask` queues
+ *   one `{kind:'multitask', taskId}` followup, `agent/pre-step` validates or
+ *   rejects that reservation, settlement while idle requests a bounded next
+ *   round, and teardown cancels owned attempts. Off by default so #4/#5/#8
+ *   keep their no-handoff mount.
  *
- * The orchestrator handoff followup (issue #6) and the task-card chat node
- * (issue #11) are later tickets' seams and deliberately absent here.
+ * The task-card chat node (issue #11) is a later ticket's seam.
  *
  * @module dsh-multitask
  */
@@ -43,12 +47,25 @@ import {
   buildResearcherStartSpec,
   mapResearchSettlement
 } from './researcher.js'
+import {
+  registerRoundDriver,
+  resolveRoundDriverConfig
+} from './round-driver.js'
+
+export {
+  DEFAULT_MAX_CONSECUTIVE_WAKES,
+  isMultitaskHandoffSource,
+  latestTask,
+  registerRoundDriver,
+  renderHandoffPrompt,
+  resolveRoundDriverConfig
+} from './round-driver.js'
 
 /** Stable Cordis plugin name. */
 export const name = 'dsh-multitask'
 
-/** The command registry must exist before this plugin's apply() runs. */
-export const inject = ['commands']
+/** Commands register the slash handler; agents own followup, pre-step, and teardown. */
+export const inject = ['commands', 'agents']
 
 /** Usage line shared by the menu description and the validation error. */
 const USAGE = 'Usage: /multitask <objective>'
@@ -85,8 +102,9 @@ function nextTaskId(session) {
  * Record a researcher settlement on the parent session that owns the child.
  *
  * @param info - `subagent/end` payload from SubagentRuntime.
+ * @param driver - optional enabled round driver.
  */
-function recordResearchSettlement(info) {
+function recordResearchSettlement(info, driver) {
   const childId = String(info.id)
   const pending = pendingResearchers.get(childId)
   if (pending === undefined) return
@@ -100,6 +118,7 @@ function recordResearchSettlement(info) {
     label: RESEARCHER_LABEL,
     stopReason: info.stopReason
   })
+  driver?.notifySettlement(pending.agent, pending.task)
 }
 
 /**
@@ -112,9 +131,10 @@ function recordResearchSettlement(info) {
  *
  * @param ctx - host context that may expose `subagents`.
  * @param invocation - the registry's invocation for the receiving agent.
+ * @param driver - optional enabled round driver.
  * @returns the settled CommandResult (text card, or validation error).
  */
-async function executeMultitaskCommand(ctx, invocation) {
+async function executeMultitaskCommand(ctx, invocation, driver) {
   const objective = invocation.rawInput.trim()
   if (objective.length === 0) {
     // Validation failure: no `multitask/task` is appended; only the
@@ -153,6 +173,7 @@ async function executeMultitaskCommand(ctx, invocation) {
       })
       pendingResearchers.set(childId, {
         session: invocation.agent.session,
+        agent: invocation.agent,
         task
       })
       researcherLine = `Researcher ${childId} (${RESEARCHER_LABEL}) launched; research phase: researching.`
@@ -168,6 +189,8 @@ async function executeMultitaskCommand(ctx, invocation) {
       researcherLine = `Researcher launch failed; research phase: research-failed.`
     }
   }
+
+  driver?.queueHandoff(invocation.agent, task)
 
   return {
     kind: 'success',
@@ -205,13 +228,16 @@ async function executeMultitaskCommand(ctx, invocation) {
  * registry is always present there.
  *
  * @param ctx - Host context.
+ * @param config - optional driver enable flag and wake bound.
  */
-export function apply(ctx) {
+export function apply(ctx, config) {
   console.log(STARTUP_LINE)
   KNOWN_SESSION_EVENT_TYPES.add('multitask/task')
   KNOWN_SESSION_EVENT_TYPES.add('multitask/research')
   KNOWN_SESSION_EVENT_TYPES.add('multitask/claims')
-  ctx.on?.('subagent/end', recordResearchSettlement)
+  const driverConfig = resolveRoundDriverConfig(config)
+  const driver = driverConfig.enabled ? registerRoundDriver(ctx, driverConfig) : undefined
+  ctx.on?.('subagent/end', (info) => recordResearchSettlement(info, driver))
   registerClaims(ctx)
   if (typeof ctx.commands?.register !== 'function') return
   ctx.commands.register({
@@ -221,6 +247,6 @@ export function apply(ctx) {
       hint: '<objective>',
       attachments: true
     },
-    handler: (invocation) => executeMultitaskCommand(ctx, invocation)
+    handler: (invocation) => executeMultitaskCommand(ctx, invocation, driver)
   })
 }
