@@ -1,5 +1,6 @@
 /**
- * Host half of the [multitask] plugin (issues #3 scaffold + #4 command + #5 researcher).
+ * Host half of the [multitask] plugin (issues #3 scaffold + #4 command +
+ * #5 researcher + #8 claims registry).
  *
  * This package is the permanent mount target of every later multitask
  * ticket. The composed desktop profile loads it through the
@@ -23,7 +24,11 @@
  *   label, and maps every supported settlement `stopReason` to
  *   `researched` / `research-failed`. The Harness SubagentRuntime remains
  *   the child lifecycle and persistence owner. The parent retrieves the
- *   full structured report through `sendMessage`.
+ *   full structured report through `sendMessage`, and
+ * - the file-claim registry (issue #8): a log-backed `multitask.claims`
+ *   service, a `multitask/claims` projection unit, and agent-scoped
+ *   `claim_files` / `release_files` / `list_file_claims` tools. Write/edit
+ *   boundary enforcement is issue #9 and is not implemented here.
  *
  * The orchestrator handoff followup (issue #6) and the task-card chat node
  * (issue #11) are later tickets' seams and deliberately absent here.
@@ -32,6 +37,7 @@
  */
 
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
+import { registerClaims } from './claims.js'
 import {
   RESEARCHER_LABEL,
   buildResearcherStartSpec,
@@ -178,7 +184,8 @@ async function executeMultitaskCommand(ctx, invocation) {
 
 /**
  * Log the scaffold startup line, declare the multitask session-event
- * vocabulary, listen for researcher settlement, and register `/multitask`.
+ * vocabulary, listen for researcher settlement, register claims, and
+ * register `/multitask`.
  *
  * The startup line goes straight to the Harness process stdout so it lands
  * in the desktop's `harness.log`. The event-vocabulary registration exists
@@ -203,7 +210,9 @@ export function apply(ctx) {
   console.log(STARTUP_LINE)
   KNOWN_SESSION_EVENT_TYPES.add('multitask/task')
   KNOWN_SESSION_EVENT_TYPES.add('multitask/research')
+  KNOWN_SESSION_EVENT_TYPES.add('multitask/claims')
   ctx.on?.('subagent/end', recordResearchSettlement)
+  registerClaims(ctx)
   if (typeof ctx.commands?.register !== 'function') return
   ctx.commands.register({
     name: 'multitask',

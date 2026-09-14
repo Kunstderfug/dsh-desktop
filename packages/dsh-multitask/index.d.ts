@@ -3,9 +3,10 @@
  *
  * Declares the plugin's runtime exports for type-only consumers (the
  * implementation module `./index.js` is plain JavaScript) and augments the
- * session event vocabulary with the plugin-owned `multitask/task` mint and
- * `multitask/research` researcher lifecycle — the same `declare module`
- * pattern `@deepseek-ai/dsh-plan-mode` uses for `plan/mode`.
+ * session event vocabulary with the plugin-owned `multitask/task` mint,
+ * `multitask/research` researcher lifecycle, and `multitask/claims` registry
+ * records — the same `declare module` pattern `@deepseek-ai/dsh-plan-mode`
+ * uses for `plan/mode`.
  *
  * @module dsh-multitask
  */
@@ -58,6 +59,23 @@ declare module '@deepseek-ai/dsh-session/types' {
             /** Settlement reason when the researcher reached a terminal phase. */
             stopReason?: MultitaskResearchStopReason
         }
+        /**
+         * One claim or release state change. Log-only, folded by the
+         * `multitask/claims` projection unit. Identity is the workspace-relative
+         * path plus task id and owner session id.
+         */
+        'multitask/claims': {
+            /** Workspace-relative normalized path. */
+            path: string
+            /** The parent task id, `MT-<n>`. */
+            taskId: string
+            /** Session id of the owning agent (parent or child). */
+            ownerSessionId: string
+            /** Event state recorded by this append. */
+            state: 'claimed' | 'released'
+            /** ISO-8601 timestamp of this append. */
+            since: string
+        }
     }
 }
 
@@ -68,8 +86,24 @@ export declare const name: 'dsh-multitask'
 export declare const inject: string[]
 
 /**
- * Log the scaffold startup line, listen for researcher settlement, and
- * register the `/multitask` command.
+ * Log the scaffold startup line, listen for researcher settlement, register
+ * claims, and register the `/multitask` command.
  * @param ctx - Host context.
  */
 export declare function apply(ctx: Context): void
+
+export type {
+  MultitaskClaimRecord,
+  MultitaskClaimsProjectionState,
+  MultitaskClaimsWireView
+} from './claims.js'
+export {
+  CLAIM_CONFLICT_CODE,
+  CLAIM_EVENT_TYPE,
+  CLAIM_TOOL_NAMES,
+  ClaimConflictError,
+  MultitaskClaimsService,
+  normalizeClaimPath,
+  pathsOverlap,
+  registerClaims
+} from './claims.js'
