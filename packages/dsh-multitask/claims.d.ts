@@ -55,6 +55,9 @@ export declare class ClaimConflictError extends HarnessError {
   constructor(path: string, holderTaskId: string)
 }
 
+/** Fold the session log into the live claim table without the projection unit. */
+export declare function effectiveClaims(session: Session): MultitaskClaimRecord[]
+
 /** Normalize one caller path to a workspace-relative identity. */
 export declare function normalizeClaimPath(cwd: string | undefined, input: unknown): string
 
@@ -78,7 +81,26 @@ export declare class MultitaskClaimsService extends Service {
     paths: readonly string[]
   ): Promise<{ released: string[] }>
   list(session: Session): Promise<MultitaskClaimsWireView>
+  releaseAll(
+    session: Session,
+    ownerSessionId: string,
+    taskId?: string
+  ): Promise<{ released: string[] }>
+  recordTouched(session: Session, rawPath: unknown): void
+  touchedOf(session: Session): string[]
+  preclaimTouched(
+    session: Session,
+    ownerSessionId: string,
+    taskId: string
+  ): Promise<{ claimed: string[], idempotent: boolean }>
+  holderFor(session: Session, rawPath: string): Promise<MultitaskClaimRecord | undefined>
 }
+
+/** Resolve the multitask-owning session for an agent, or `undefined`. */
+export declare function resolveMultitaskSession(
+  ctx: Context,
+  agent: { session: Session }
+): Session | undefined
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

@@ -20,6 +20,7 @@ window.__ModuleLoader__.load({
     const HANDOFF_PATTERN = /orchestrator handoff for (MT-[1-9][0-9]*)/i
     const TASK_ID_PATTERN = /MT-[1-9][0-9]*/g
     const CLAIM_PROJECTION = 'multitask/claims'
+    const BASH_TIER2_SCOPE_NOTE = 'Native write/edit tools are guarded; Bash writes are not covered by tier 2.'
     const PLACEHOLDER_SLOT = 'conversation.composer.dock'
     const PLACEHOLDER_ID = 'dsh-multitask-placeholder'
 
@@ -88,6 +89,8 @@ window.__ModuleLoader__.load({
         failed: false,
         childIds: [],
         claims: [],
+        notes: [],
+        interventions: 0,
         commandIds: []
       }
     }
@@ -121,6 +124,14 @@ window.__ModuleLoader__.load({
         task.claims = next
         return task
       }
+      if (event.type === 'multitask/denial') {
+        const reason = String(data.reason ?? data.note ?? '')
+        if (reason !== '') {
+          task.notes = [...(task.notes ?? []), reason]
+          task.interventions = (task.interventions ?? 0) + 1
+        }
+        return task
+      }
       if (typeof event.type === 'string' && event.type.startsWith('multitask/')) {
         if (typeof data.objective === 'string' && data.objective !== '') task.objective = data.objective
         if (data.id !== undefined) task.id = data.id
@@ -140,6 +151,7 @@ window.__ModuleLoader__.load({
     function eventTaskId(event) {
       const data = event.data ?? {}
       if (event.type === 'multitask/claims') return data.taskId
+      if (event.type === 'multitask/denial') return data.id ?? data.taskId
       if (event.type === 'command/done') return extractTaskId(data.text ?? '')
       if (event.type === 'command/run') return undefined
       if (typeof event.type === 'string' && event.type.startsWith('multitask/')) return data.id
@@ -162,12 +174,18 @@ window.__ModuleLoader__.load({
         .map((claim) => claim.path)
         .filter(Boolean)
       const children = task.childIds ?? []
+      const notes = (task.notes ?? []).map((note) => {
+        const text = String(note)
+        return text.startsWith('Boundary intervention:') ? text : `Boundary intervention: ${text}`
+      })
       return [
         `Task ${task.id}`,
         `Phase: ${task.phase}`,
         `Objective: ${task.objective}`,
         children.length > 0 ? `Children: ${children.join(', ')}` : '',
         claims.length > 0 ? `Claims: ${claims.join(', ')}` : '',
+        ...notes,
+        BASH_TIER2_SCOPE_NOTE,
         task.failed ? 'State: failed' : ''
       ].filter((line) => line !== '').join('\n')
     }
@@ -182,6 +200,9 @@ window.__ModuleLoader__.load({
       }
       if (event.type === 'multitask/claims' && event.data?.taskId) {
         return { id: String(event.data.taskId), role: 'update' }
+      }
+      if (event.type === 'multitask/denial' && (event.data?.id || event.data?.taskId)) {
+        return { id: String(event.data.id ?? event.data.taskId), role: 'update' }
       }
       if (event.type === 'command/run') return null
       if (typeof event.type === 'string' && event.type.startsWith('multitask/') && event.data?.id) {
@@ -199,6 +220,8 @@ window.__ModuleLoader__.load({
         ...context.state,
         childIds: [...(context.state.childIds ?? [])],
         claims: [...(context.state.claims ?? [])],
+        notes: [...(context.state.notes ?? [])],
+        interventions: context.state.interventions ?? 0,
         commandIds: [...(context.state.commandIds ?? [])]
       }, match.event)
     }
@@ -282,7 +305,7 @@ window.__ModuleLoader__.load({
         const next = [...published.tasks.filter((row) => row.id !== merged.id), merged]
         publishTasks(next)
         return () => publishTasks(published.tasks.filter((row) => row.id !== merged.id))
-      }, [merged.id, merged.phase, merged.objective, merged.failed, (merged.childIds ?? []).join(','), (merged.claims ?? []).map((claim) => claim.path).join(',')])
+      }, [merged.id, merged.phase, merged.objective, merged.failed, (merged.childIds ?? []).join(','), (merged.claims ?? []).map((claim) => claim.path).join(','), (merged.notes ?? []).join('|')])
       if (narrow) {
         return React.createElement(
           'pre',
@@ -358,7 +381,24 @@ window.__ModuleLoader__.load({
         (merged.claims ?? []).map((claim) => React.createElement(
           ClaimBadge,
           { key: `${claim.path}:${claim.taskId}`, claim }
-        ))
+        )),
+        (merged.notes ?? []).map((note, index) => React.createElement(
+          'div',
+          {
+            key: `note:${index}`,
+            'data-dsh-multitask-intervention': '',
+            style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary, #555)' }
+          },
+          String(note).startsWith('Boundary intervention:') ? String(note) : `Boundary intervention: ${note}`
+        )),
+        React.createElement(
+          'div',
+          {
+            'data-dsh-multitask-bash-scope': '',
+            style: { fontSize: '11px', color: 'var(--dsw-alias-label-tertiary, #888)' }
+          },
+          BASH_TIER2_SCOPE_NOTE
+        )
       )
     }
 

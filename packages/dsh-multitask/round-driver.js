@@ -9,6 +9,7 @@
 
 import { isDeepStrictEqual } from 'node:util'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { effectiveClaims } from './claims.js'
 
 /** Jobs-plugin anti-self-excitation default. */
 export const DEFAULT_MAX_CONSECUTIVE_WAKES = 3
@@ -36,14 +37,21 @@ export function resolveRoundDriverConfig(config = {}) {
  * Render the model-visible orchestrator handoff for one task.
  *
  * @param task - minted `{ id, objective }`.
+ * @param claims - live effective claim rows, already reconciled.
  * @returns one text block for `createUserMessage`.
  */
-export function renderHandoffPrompt(task) {
+export function renderHandoffPrompt(task, claims = []) {
+  const live = (claims ?? []).filter(claim => claim.state !== 'released')
+  const table = live.length === 0
+    ? 'Live claims: (none)'
+    : `Live claims:\n${live.map(claim => `- ${claim.path} held by ${claim.taskId} (owner ${claim.ownerSessionId})`).join('\n')}`
   return [{
     type: 'text',
     text: `<multitask_round>
 Task: ${task.id}
 Objective: ${JSON.stringify(task.objective)}
+
+${table}
 
 Continue the multitask workflow for this task in this same session. Inspect researcher progress and durable session state, then orchestrate the next research or implementation step.
 </multitask_round>`
@@ -169,8 +177,26 @@ export function registerRoundDriver(ctx, config) {
     if (state.attempt !== undefined) state.attempt.stale = true
   }
 
-  function queueMessage(state, task) {
-    const content = renderHandoffPrompt(task)
+  function snapshotClaims(agent) {
+    const state = ctx.get?.('sessionProjections')?.stateOf?.(agent.session, 'multitask/claims')
+    const records = (state?.records ?? []).filter(record => record.state === 'claimed')
+    return records.length > 0 ? records : effectiveClaims(agent.session)
+  }
+
+  async function liveClaims(agent) {
+    const service = ctx.get?.('multitask.claims')
+    if (typeof service?.list === 'function') {
+      try {
+        return (await service.list(agent.session)).claims
+      } catch {
+        return snapshotClaims(agent)
+      }
+    }
+    return snapshotClaims(agent)
+  }
+
+  function queueMessage(state, task, claims = []) {
+    const content = renderHandoffPrompt(task, claims)
     const message = createUserMessage({
       content,
       source: {
@@ -189,17 +215,66 @@ export function registerRoundDriver(ctx, config) {
     try {
       state.agent.followup(message)
     } catch (error) {
-      state.attempt = undefined
-      ctx.logger?.warn?.(`multitask-round-driver: could not queue handoff for ${task.id}: ${renderThrown(error)}`)
+      try {
+        state.agent.inbox.prepend('next-turn', message)
+      } catch {
+        state.attempt = undefined
+        ctx.logger?.warn?.(`multitask-round-driver: could not queue handoff for ${task.id}: ${renderThrown(error)}`)
+      }
     }
     return message
   }
 
-  function queueHandoff(agent, task) {
+  function taskObjective(session, taskId) {
+    let objective = ''
+    for (const event of session.snapshotEvents()) {
+      if (event.type === 'multitask/task' && String(event.data?.id ?? '') === String(taskId)) {
+        objective = String(event.data?.objective ?? '')
+      }
+    }
+    return objective
+  }
+
+  function queueHandoff(agent, task, claims) {
     if (task?.id == null) return
     const state = stateFor(agent)
     if (state.stopping) return
-    queueMessage(state, task)
+    queueMessage(state, task, claims ?? snapshotClaims(agent))
+  }
+
+  function refreshHandoffTable(agent, claims) {
+    const state = stateFor(agent)
+    if (state.stopping) return
+    const table = claims ?? snapshotClaims(agent)
+    const queued = [...agent.inbox.nextTurn, ...agent.inbox.nextStep]
+      .filter(message => isMultitaskHandoffSource(message.source))
+    for (const message of queued) {
+      if (!agent.inbox.remove(message.id)) continue
+      const task = {
+        id: message.source.taskId,
+        objective: taskObjective(agent.session, message.source.taskId)
+      }
+      const content = renderHandoffPrompt(task, table)
+      const next = createUserMessage({
+        content,
+        source: { kind: 'multitask', taskId: task.id }
+      })
+      try {
+        agent.followup(next)
+      } catch {
+        try {
+          agent.inbox.prepend('next-turn', next)
+        } catch {
+          /* the original message is already out of the inbox */
+        }
+      }
+      if (state.attempt !== undefined && state.attempt.taskId === task.id) {
+        state.attempt.messageId = next.id
+        state.attempt.content = content
+        state.attempt.stale = false
+        state.attempt.cancelled = false
+      }
+    }
   }
 
   function notifySettlement(agent, task) {
@@ -232,7 +307,7 @@ export function registerRoundDriver(ctx, config) {
       return
     }
     state.needsWake = false
-    queueMessage(state, task)
+    queueMessage(state, task, await liveClaims(state.agent))
   }
 
   function startDetached(operation) {
@@ -442,5 +517,5 @@ export function registerRoundDriver(ctx, config) {
     }
   }, 'multitask-round-driver lifecycle')
 
-  return { queueHandoff, notifySettlement }
+  return { queueHandoff, notifySettlement, refreshHandoffTable }
 }
