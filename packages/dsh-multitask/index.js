@@ -42,7 +42,12 @@
  *   an accepted `agent/pre-step`. While active, the named
  *   `multitask:orchestrator` section is included and activation adds the
  *   ticket-named narration to that accepted step. The tool catalog is
- *   unchanged.
+ *   unchanged, and
+ * - writer guardrails (issue #10): `maxWriters` (default 2) is enforced at
+ *   the writer-facing `subagent` tool. A structured cap refusal queues or
+ *   yields through the existing round-driver wake budget. Busy-parent
+ *   touched paths are claimed before publication and omitted from admitted
+ *   writer briefs. Researcher identities never consume a writer slot.
  *
  * The task-card chat node (issue #11) is a later ticket's seam.
  *
@@ -52,6 +57,10 @@
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import { effectiveClaims, registerClaims } from './claims.js'
 import { registerClaimsGuard } from './claims-guard.js'
+import {
+  registerGuardrails,
+  resolveGuardrailsConfig
+} from './guardrails.js'
 import { registerOrchestratorMode } from './orchestrator-mode.js'
 import {
   RESEARCHER_LABEL,
@@ -64,6 +73,15 @@ import {
   resolveRoundDriverConfig
 } from './round-driver.js'
 
+export {
+  DEFAULT_MAX_WRITERS,
+  WRITER_CAP_CODE,
+  WRITER_TOOL_NAME,
+  MultitaskGuardrails,
+  formatWriterCapRefusal,
+  registerGuardrails,
+  resolveGuardrailsConfig
+} from './guardrails.js'
 export {
   MODE_EVENT_TYPE,
   ORCHESTRATOR_GUIDANCE,
@@ -210,10 +228,11 @@ function recordResearchSettlement(info, driver) {
   driver?.notifySettlement(pending.agent, pending.task)
 }
 
-async function settleChild(ctx, info, driver) {
+async function settleChild(ctx, info, driver, guardrails) {
   try {
     recordResearchSettlement(info, driver)
   } finally {
+    guardrails?.releaseChild?.(String(info.id))
     await releaseSettledOwnerClaims(ctx, info)
     childParents.delete(String(info.id))
   }
@@ -346,7 +365,7 @@ async function executeMultitaskCommand(ctx, invocation, driver, mode) {
  * registry is always present there.
  *
  * @param ctx - Host context.
- * @param config - optional driver enable flag and wake bound.
+ * @param config - optional driver enable flag, wake bound, and writer cap.
  */
 export function apply(ctx, config) {
   console.log(STARTUP_LINE)
@@ -357,12 +376,18 @@ export function apply(ctx, config) {
   KNOWN_SESSION_EVENT_TYPES.add('multitask/mode')
   registerClaimsGuard(ctx)
   const driverConfig = resolveRoundDriverConfig(config)
+  const guardrailsConfig = resolveGuardrailsConfig(config)
+  const guardrails = registerGuardrails(ctx, {
+    maxWriters: guardrailsConfig.maxWriters,
+    driverConfig
+  })
   const driver = driverConfig.enabled ? registerRoundDriver(ctx, driverConfig) : undefined
+  guardrails?.bindDriver(driver)
   const mode = registerOrchestratorMode(ctx)
   ctx.on?.('agent/created', ({ agent }) => {
     rememberChildParent(agent.session.id, agent.session.header.parentSession)
   })
-  ctx.on?.('subagent/end', (info) => settleChild(ctx, info, driver))
+  ctx.on?.('subagent/end', (info) => settleChild(ctx, info, driver, guardrails))
   registerClaims(ctx)
   if (typeof ctx.commands?.register !== 'function') return
   ctx.commands.register({

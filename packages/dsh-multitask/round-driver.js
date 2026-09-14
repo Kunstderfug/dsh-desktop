@@ -38,20 +38,32 @@ export function resolveRoundDriverConfig(config = {}) {
  *
  * @param task - minted `{ id, objective }`.
  * @param claims - live effective claim rows, already reconciled.
+ * @param extras - optional capacity snapshot and protected parent paths.
  * @returns one text block for `createUserMessage`.
  */
-export function renderHandoffPrompt(task, claims = []) {
+export function renderHandoffPrompt(task, claims = [], extras = {}) {
   const live = (claims ?? []).filter(claim => claim.state !== 'released')
   const table = live.length === 0
     ? 'Live claims: (none)'
     : `Live claims:\n${live.map(claim => `- ${claim.path} held by ${claim.taskId} (owner ${claim.ownerSessionId})`).join('\n')}`
+  const capacity = extras.capacity
+  const capacityBlock = capacity == null
+    ? ''
+    : `\n\nWriter capacity: ${capacity.active}/${capacity.maxWriters} active (maxWriters=${capacity.maxWriters}, maxConsecutiveWakes=${capacity.maxConsecutiveWakes}).`
+      + (capacity.available > 0
+        ? ` ${capacity.available} slot(s) available.`
+        : ' At cap; yield and queue for a later round.')
+  const protectedPaths = extras.protectedPaths ?? []
+  const protectedBlock = protectedPaths.length === 0
+    ? ''
+    : `\nProtected parent paths:\n${protectedPaths.map(path => `- ${path}`).join('\n')}`
   return [{
     type: 'text',
     text: `<multitask_round>
 Task: ${task.id}
 Objective: ${JSON.stringify(task.objective)}
 
-${table}
+${table}${capacityBlock}${protectedBlock}
 
 Continue the multitask workflow for this task in this same session. Inspect researcher progress and durable session state, then orchestrate the next research or implementation step.
 </multitask_round>`
@@ -106,11 +118,20 @@ function restoreOtherClaimed(agent, messages, messageId) {
  *
  * @param ctx - composed host context (agents, sessions, events).
  * @param config - already-resolved `{ maxConsecutiveWakes }`.
- * @returns `{ queueHandoff, notifySettlement }`.
+ * @returns `{ queueHandoff, notifySettlement, refreshHandoffTable, queueLaterRound, snapshotBudget, config }`.
  */
 export function registerRoundDriver(ctx, config) {
   const maxConsecutiveWakes = config.maxConsecutiveWakes
   const states = new Map()
+
+  function admissionExtras(agent) {
+    const guardrails = ctx.get?.('multitask.guardrails')
+    if (guardrails == null) return {}
+    return {
+      capacity: guardrails.capacitySnapshot(agent),
+      protectedPaths: guardrails.protectedPaths(agent)
+    }
+  }
 
   function stateFor(agent) {
     const existing = states.get(agent)
@@ -196,7 +217,7 @@ export function registerRoundDriver(ctx, config) {
   }
 
   function queueMessage(state, task, claims = []) {
-    const content = renderHandoffPrompt(task, claims)
+    const content = renderHandoffPrompt(task, claims, admissionExtras(state.agent))
     const message = createUserMessage({
       content,
       source: {
@@ -254,7 +275,7 @@ export function registerRoundDriver(ctx, config) {
         id: message.source.taskId,
         objective: taskObjective(agent.session, message.source.taskId)
       }
-      const content = renderHandoffPrompt(task, table)
+      const content = renderHandoffPrompt(task, table, admissionExtras(agent))
       const next = createUserMessage({
         content,
         source: { kind: 'multitask', taskId: task.id }
@@ -517,5 +538,31 @@ export function registerRoundDriver(ctx, config) {
     }
   }, 'multitask-round-driver lifecycle')
 
-  return { queueHandoff, notifySettlement, refreshHandoffTable }
+  function snapshotBudget(agent) {
+    const state = stateFor(agent)
+    return {
+      consecutiveWakes: state.consecutiveWakes,
+      maxConsecutiveWakes,
+      config
+    }
+  }
+
+  function queueLaterRound(agent, task) {
+    if (task?.id == null) return { queued: false }
+    const state = stateFor(agent)
+    if (state.stopping || state.disarmed) return { queued: false, reason: 'stopped' }
+    const already = [...agent.inbox.nextTurn, ...agent.inbox.nextStep]
+      .some(message => isMultitaskHandoffSource(message.source) && message.source.taskId === task.id)
+    if (already) return { queued: true, unique: true, reason: 'already-queued' }
+    if (state.consecutiveWakes >= maxConsecutiveWakes) {
+      state.needsWake = false
+      return { queued: false, reason: 'wake-bound' }
+    }
+    state.wakeTask = { id: task.id, objective: String(task.objective ?? '') }
+    state.needsWake = true
+    if (agent.status === 'idle') requestDrive(state)
+    return { queued: true, unique: true, reason: 'yield' }
+  }
+
+  return { queueHandoff, notifySettlement, refreshHandoffTable, queueLaterRound, snapshotBudget, config }
 }

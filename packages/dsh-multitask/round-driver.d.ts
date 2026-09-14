@@ -38,8 +38,20 @@ export interface MultitaskDriverTask {
   objective: string
 }
 
+/** Capacity/protected-path extras rendered into a handoff. */
+export interface MultitaskHandoffExtras {
+  capacity?: {
+    active: number
+    maxWriters: number
+    available: number
+    maxConsecutiveWakes: number
+  }
+  protectedPaths?: readonly string[]
+}
+
 /** Public driver seams used by the host plugin. */
 export interface MultitaskRoundDriver {
+  readonly config: ResolvedRoundDriverConfig
   queueHandoff(
     agent: Agent,
     task: MultitaskDriverTask,
@@ -50,6 +62,15 @@ export interface MultitaskRoundDriver {
     agent: Agent,
     claims?: readonly Pick<MultitaskClaimRecord, 'path' | 'taskId' | 'ownerSessionId' | 'state'>[]
   ): void
+  queueLaterRound?(
+    agent: Agent,
+    task: MultitaskDriverTask
+  ): { queued: boolean, unique?: boolean, reason?: string }
+  snapshotBudget?(agent: Agent): {
+    consecutiveWakes: number
+    maxConsecutiveWakes: number
+    config: ResolvedRoundDriverConfig
+  }
 }
 
 declare module '@deepseek-ai/dsh-llm' {
@@ -71,7 +92,8 @@ export declare function resolveRoundDriverConfig(
 /** Render the model-visible orchestrator handoff for one task. */
 export declare function renderHandoffPrompt(
   task: MultitaskDriverTask,
-  claims?: readonly Pick<MultitaskClaimRecord, 'path' | 'taskId' | 'ownerSessionId' | 'state'>[]
+  claims?: readonly Pick<MultitaskClaimRecord, 'path' | 'taskId' | 'ownerSessionId' | 'state'>[],
+  extras?: MultitaskHandoffExtras
 ): ContentBlock[]
 
 /** Latest fold-derived task on a session log, if any. */

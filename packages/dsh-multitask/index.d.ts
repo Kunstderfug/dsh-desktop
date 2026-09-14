@@ -12,6 +12,10 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { MultitaskRoundDriverConfig } from './round-driver.js'
+import type { MultitaskGuardrailsConfig } from './guardrails.js'
+
+/** Plugin config: round-driver enable/bound plus the writer cap. */
+export interface MultitaskPluginConfig extends MultitaskRoundDriverConfig, MultitaskGuardrailsConfig {}
 
 /** Researcher lifecycle phases published on `multitask/research` events. */
 export type MultitaskResearchPhase = 'researching' | 'researched' | 'research-failed'
@@ -125,9 +129,9 @@ export declare const inject: string[]
  * claims, mount orchestrator mode, optionally install the round driver, and
  * register the `/multitask` command.
  * @param ctx - Host context.
- * @param config - optional driver enable flag and wake bound.
+ * @param config - optional driver enable flag, wake bound, and writer cap.
  */
-export declare function apply(ctx: Context, config?: MultitaskRoundDriverConfig): void
+export declare function apply(ctx: Context, config?: MultitaskPluginConfig): void
 
 export type {
   MultitaskHandoffSource,
@@ -174,6 +178,21 @@ export type {
   OrchestratorModeProjectionState,
   OrchestratorModeWireView
 } from './orchestrator-mode.js'
+export type {
+  MultitaskGuardrailsConfig,
+  ResolvedGuardrailsConfig,
+  WriterCapacitySnapshot,
+  WriterCapRefusal
+} from './guardrails.js'
+export {
+  DEFAULT_MAX_WRITERS,
+  WRITER_CAP_CODE,
+  WRITER_TOOL_NAME,
+  MultitaskGuardrails,
+  formatWriterCapRefusal,
+  registerGuardrails,
+  resolveGuardrailsConfig
+} from './guardrails.js'
 export {
   MODE_EVENT_TYPE,
   ORCHESTRATOR_GUIDANCE,
