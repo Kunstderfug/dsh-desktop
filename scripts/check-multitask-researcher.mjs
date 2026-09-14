@@ -376,12 +376,10 @@ async function assertLaunchAndDenial() {
     await waitFor(() => app.agent.session.deriveMessages()
       .filter((message) => message.source.kind === 'subagent-settled').length >= 2,
     'retrieval settlement')
-    const surface = [
-      STRUCTURED_REPORT,
-      ...app.agent.session.deriveMessages()
-        .filter((message) => message.source.kind === 'subagent-settled')
-        .map((message) => message.content.map((block) => (block.type === 'text' ? block.text : '')).join('\n'))
-    ].join('\n')
+    const surface = app.agent.session.deriveMessages()
+      .filter((message) => message.source.kind === 'subagent-settled')
+      .map((message) => message.content.map((block) => (block.type === 'text' ? block.text : '')).join('\n'))
+      .join('\n')
     for (const heading of REPORT_HEADINGS) {
       if (!surface.includes(heading)) fail(`retrieved report is missing ${heading}`)
     }
