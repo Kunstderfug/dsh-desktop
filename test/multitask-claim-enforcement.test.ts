@@ -9,7 +9,8 @@
  * adapter is scripted.
  *
  * These regressions observe a native denied write, one denial, recovery, an
- * accurate live claim table, host release before retry, and the Bash
+ * accurate live claim table, host release before retry across every supported
+ * settlement variant, researcher lifecycle after `subagent/end`, and the Bash
  * tier-2 footnote — not a guard helper, a hard-coded probe, or a final-state
  * snapshot.
  */
@@ -28,6 +29,7 @@ import { FsError, FsTargetKey } from '@deepseek-ai/dsh-fs'
 import SandboxedFileSystem from '@deepseek-ai/dsh-fs-sandbox'
 import * as observationPolicy from '@deepseek-ai/dsh-fs-observation-policy'
 import {
+  type FinishReason,
   type GenerateOptions,
   LlmAdapter,
   LlmRuntime,
@@ -139,6 +141,28 @@ function isResearcherCall(call: ScriptedCall): boolean {
 
 function isWriterCall(call: ScriptedCall): boolean {
   return userText(call.request).includes('stays live to claim files')
+}
+
+function isWriterACall(call: ScriptedCall): boolean {
+  return userText(call.request).includes('writer A stays live to claim files')
+}
+
+function isWriterBCall(call: ScriptedCall): boolean {
+  return userText(call.request).includes('writer B stays live to claim files')
+}
+
+function* textChunks(text: string, reason: FinishReason = { kind: 'stop' }): Generator<StreamChunk> {
+  yield { type: 'block-start', index: 0, blockType: 'text' }
+  yield { type: 'text-delta', index: 0, text }
+  yield { type: 'block-end', index: 0, block: { type: 'text', text } }
+  yield { type: 'usage', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }
+  yield { type: 'finish', reason }
+}
+
+function researchEvents(agent: Agent) {
+  return agent.session.snapshotEvents()
+    .filter(event => event.type === 'multitask/research')
+    .map(event => event.data as Record<string, unknown>)
 }
 
 function gate(): { promise: Promise<void>, open: () => void } {
@@ -466,37 +490,157 @@ describe('multitask_claim_enforcement_gate handoff table and pre-claim', () => {
 })
 
 describe('multitask_claim_enforcement_gate release-on-settle', () => {
-  it('releases the holder on abort without a model release and lets the retry succeed', { timeout: 30_000 }, async () => {
+  it.each([
+    { name: 'completed', settle: 'completed' as const, stopReason: 'completed' },
+    { name: 'max-tokens', settle: 'max-tokens' as const, stopReason: 'max-tokens' },
+    { name: 'refusal', settle: 'refusal' as const, stopReason: 'refusal' },
+    { name: 'error', settle: 'error' as const, stopReason: 'error' },
+    { name: 'aborted', settle: 'aborted' as const, stopReason: 'aborted' },
+    { name: 'killed/cancelled', settle: 'cancelled' as const, stopReason: 'aborted' }
+  ])('releases only the settled owner on $name and preserves unrelated claims', { timeout: 30_000 }, async ({ name, settle, stopReason }) => {
+    const holdA = gate()
+    const holdB = gate()
+    const admitWriters = gate()
+    let holdNewWriters = false
+    const rejectIds = new Set<string>()
+    const ends = new Map<string, string>()
+    const f = await fixture({
+      respond: async (call) => {
+        if (isWriterACall(call)) {
+          await holdUntil(call.request.signal, holdA.promise)
+          if (settle === 'error') throw new Error('scripted writer transport failure')
+          if (settle === 'max-tokens') return textChunks('partial writer A before the ceiling', { kind: 'max-tokens' })
+          return 'writer A completed'
+        }
+        if (isWriterBCall(call)) {
+          await holdUntil(call.request.signal, holdB.promise)
+          return 'writer B held'
+        }
+        if (isResearcherCall(call)) return STRUCTURED_REPORT
+        return 'parent ack'
+      }
+    })
+    f.ctx.on('subagent/end', (info: { id: string, stopReason?: string }) => {
+      ends.set(String(info.id), String(info.stopReason ?? ''))
+    })
+    f.ctx.on('agent/pre-step', async ({ agent }, next) => {
+      if (!holdNewWriters || agent.session.header.origin !== 'subagent') return next()
+      await admitWriters.promise
+      if (rejectIds.has(String(agent.session.id))) return { kind: 'reject' }
+      return next()
+    })
+
+    await runCommand(f.ctx, f.agent, '/multitask implement shared file A')
+    await runCommand(f.ctx, f.agent, '/multitask implement shared file B')
+    holdNewWriters = true
+    const startA = await f.ctx.subagents.startContinuable({
+      provider: 'spawn',
+      label: 'writer-a',
+      request: {
+        prompt: [{ type: 'text', text: 'writer A stays live to claim files' }],
+        parent: f.agent
+      },
+      signal: new AbortController().signal
+    })
+    const startB = await f.ctx.subagents.startContinuable({
+      provider: 'spawn',
+      label: 'writer-b',
+      request: {
+        prompt: [{ type: 'text', text: 'writer B stays live to claim files' }],
+        parent: f.agent
+      },
+      signal: new AbortController().signal
+    })
+    const childIds = [String(startA.childId), String(startB.childId)]
+    await waitFor(() => childIds.every(id => f.ctx.agents.get(SessionId(id)) !== undefined), 'live writer agents')
+    const childA = f.ctx.agents.get(SessionId(childIds[0]!))!
+    const childB = f.ctx.agents.get(SessionId(childIds[1]!))!
+
+    await runTool(f.ctx, childA, 'claim_files', { paths: ['src/held.ts'], taskId: 'MT-1' })
+    await runTool(f.ctx, childB, 'claim_files', { paths: ['src/other.ts'], taskId: 'MT-2' })
+    const blocked = await runTool(f.ctx, childB, 'write', {
+      file_path: path.join(f.home, 'src/held.ts'),
+      content: 'still blocked'
+    })
+    expect(blocked.isError).toBe(true)
+    expect(liveClaims(f.agent).get('src/held.ts')?.taskId).toBe('MT-1')
+    expect(liveClaims(f.agent).get('src/other.ts')?.taskId).toBe('MT-2')
+
+    if (settle === 'refusal') rejectIds.add(childIds[0]!)
+    admitWriters.open()
+
+    if (settle !== 'refusal') {
+      await waitFor(() => ends.has(childIds[0]!) === false && childA.status !== undefined, 'writer A admitted')
+      if (settle === 'aborted') {
+        await f.ctx.subagents.drainContinuableChildren(f.agent, [SessionId(childIds[0]!)])
+      } else if (settle === 'cancelled') {
+        childA.cancel({ kind: 'user' })
+      }
+      holdA.open()
+    }
+
+    await waitFor(() => ends.get(childIds[0]!) === stopReason, `${name} settled as ${stopReason}`)
+    await waitFor(() => !liveClaims(f.agent).has('src/held.ts'), `holder claims released after ${name}`)
+    expect(claimEvents(f.agent).filter(event => event.path === 'src/held.ts' && event.state === 'released').length).toBeGreaterThan(0)
+    expect(liveClaims(f.agent).has('src/held.ts')).toBe(false)
+    expect(liveClaims(f.agent).get('src/other.ts')?.taskId).toBe('MT-2')
+    expect(String(liveClaims(f.agent).get('src/other.ts')?.ownerSessionId)).toBe(String(childB.session.id))
+
+    const retry = await runTool(f.ctx, childB, 'write', {
+      file_path: path.join(f.home, 'src/held.ts'),
+      content: `retry after ${name}`
+    })
+    expect(retry.isError, `retry after ${name} must succeed without a model release`).toBe(false)
+    expect(await readFile(path.join(f.home, 'src/held.ts'), 'utf8')).toBe(`retry after ${name}`)
+    expect(liveClaims(f.agent).get('src/other.ts')?.taskId).toBe('MT-2')
+
+    holdB.open()
+    await f.agent.whenIdle()
+  })
+
+  it('keeps researcher completed and error mapping while an unrelated writer claim stays live', { timeout: 30_000 }, async () => {
     const hold = gate()
+    let researcherCalls = 0
     const f = await fixture({
       respond: async (call) => {
         if (isWriterCall(call)) {
           await holdUntil(call.request.signal, hold.promise)
           return 'writer held'
         }
-        if (isResearcherCall(call)) return STRUCTURED_REPORT
+        if (isResearcherCall(call)) {
+          researcherCalls += 1
+          if (researcherCalls >= 2) throw new Error('scripted researcher transport failure')
+          return STRUCTURED_REPORT
+        }
         return 'parent ack'
       }
     })
-    const { childA, childB, childIds } = await launchTwoHeldChildren(f, hold)
-    await runTool(f.ctx, childA, 'claim_files', { paths: ['src/held.ts'], taskId: 'MT-1' })
-    const blocked = await runTool(f.ctx, childB, 'write', {
-      file_path: path.join(f.home, 'src/held.ts'),
-      content: 'still blocked'
-    })
-    expect(blocked.isError).toBe(true)
+    await runCommand(f.ctx, f.agent, '/multitask research the structured report')
+    await waitFor(() => researchEvents(f.agent).some(event => event.phase === 'researched'), 'completed → researched')
+    const researched = researchEvents(f.agent).find(event => event.phase === 'researched')!
+    expect(researched.stopReason).toBe('completed')
+    expect(researchEvents(f.agent).every(event => event.phase !== 'research-failed')).toBe(true)
 
-    await f.ctx.subagents.drainContinuableChildren(f.agent, [SessionId(childIds[0]!)])
-    await waitFor(() => !liveClaims(f.agent).has('src/held.ts'), 'holder claims released after abort')
-    expect(claimEvents(f.agent).filter(event => event.path === 'src/held.ts' && event.state === 'released').length).toBeGreaterThan(0)
-    expect(liveClaims(f.agent).has('src/held.ts')).toBe(false)
-
-    const retry = await runTool(f.ctx, childB, 'write', {
-      file_path: path.join(f.home, 'src/held.ts'),
-      content: 'retry after abort'
+    const startB = await f.ctx.subagents.startContinuable({
+      provider: 'spawn',
+      label: 'writer-b',
+      request: {
+        prompt: [{ type: 'text', text: 'writer B stays live to claim files' }],
+        parent: f.agent
+      },
+      signal: new AbortController().signal
     })
-    expect(retry.isError).toBe(false)
-    expect(await readFile(path.join(f.home, 'src/held.ts'), 'utf8')).toBe('retry after abort')
+    await waitFor(() => f.ctx.agents.get(startB.childId) !== undefined, 'live unrelated writer')
+    const childB = f.ctx.agents.get(startB.childId)!
+    await runTool(f.ctx, childB, 'claim_files', { paths: ['src/other.ts'], taskId: 'MT-1' })
+    expect(liveClaims(f.agent).get('src/other.ts')?.taskId).toBe('MT-1')
+
+    await runCommand(f.ctx, f.agent, '/multitask observe error settlement')
+    await waitFor(() => researchEvents(f.agent).some(event => event.phase === 'research-failed'), 'error → research-failed')
+    const failed = researchEvents(f.agent).find(event => event.phase === 'research-failed')!
+    expect(failed.stopReason).toBe('error')
+    expect(liveClaims(f.agent).get('src/other.ts')?.taskId).toBe('MT-1')
+    expect(String(liveClaims(f.agent).get('src/other.ts')?.ownerSessionId)).toBe(String(childB.session.id))
 
     hold.open()
     await f.agent.whenIdle()

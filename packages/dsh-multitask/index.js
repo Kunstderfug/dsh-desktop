@@ -149,15 +149,15 @@ function sessionForSettledChild(ctx, childId) {
 
 /**
  * Host-side release of every claim the settled child still holds.
- * Skip ordinary continuable turn completion and composition teardown so
- * resume can still expire dead owners through the existing fold.
+ * Every supported child-activation stop reason is a settlement boundary,
+ * including ordinary continuable completion. Skip only composition teardown
+ * (parent agent already gone) so resume can still expire dead owners through
+ * the existing fold.
  *
  * @param ctx - host context.
  * @param info - `subagent/end` payload.
  */
 function releaseSettledOwnerClaims(ctx, info) {
-  const stop = String(info?.stopReason ?? '')
-  if (stop === 'completed' || stop === 'max-tokens' || stop === 'refusal') return
   const service = ctx.get?.('multitask.claims') ?? ctx['multitask.claims']
   const session = sessionForSettledChild(ctx, info.id)
   if (service == null || session == null) return
@@ -212,9 +212,9 @@ function recordResearchSettlement(info, driver) {
 
 async function settleChild(ctx, info, driver) {
   try {
-    recordResearchSettlement(info, driver)
-  } finally {
     await releaseSettledOwnerClaims(ctx, info)
+  } finally {
+    recordResearchSettlement(info, driver)
     childParents.delete(String(info.id))
   }
 }

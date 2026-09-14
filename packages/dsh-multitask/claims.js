@@ -39,6 +39,7 @@ export const CLAIM_EVENT_TYPE = 'multitask/claims'
 const EMPTY_STATE = Object.freeze({ records: Object.freeze([]) })
 const EMPTY_VIEW = Object.freeze({ claims: Object.freeze([]) })
 const touchedBySession = new WeakMap()
+const resumePublished = new WeakSet()
 
 const claimRecordSchema = z.object({
   path: z.string(),
@@ -220,13 +221,36 @@ export class MultitaskClaimsService extends Service {
       }
     }
     const since = new Date().toISOString()
+    const remaining = []
+    let expired = 0
     for (const claim of live) {
-      if (ownerIsLive(this.ctx, session, claim, activity)) continue
+      if (ownerIsLive(this.ctx, session, claim, activity)) {
+        remaining.push(claim)
+        continue
+      }
       session.append(CLAIM_EVENT_TYPE, {
         path: claim.path,
         taskId: claim.taskId,
         ownerSessionId: claim.ownerSessionId,
         state: 'released',
+        since
+      })
+      expired += 1
+    }
+    // Settlement-time host release already wrote the dead-owner rows. A later
+    // resume then has nothing to expire; still publish the remaining live
+    // table so restart subscribers see the folded claims view.
+    if (expired > 0 || remaining.length === 0 || resumePublished.has(session)) return
+    const alreadyReleased = session.snapshotEvents().some(event =>
+      event.type === CLAIM_EVENT_TYPE && event.data?.state === 'released')
+    if (!alreadyReleased) return
+    resumePublished.add(session)
+    for (const claim of remaining) {
+      session.append(CLAIM_EVENT_TYPE, {
+        path: claim.path,
+        taskId: claim.taskId,
+        ownerSessionId: claim.ownerSessionId,
+        state: 'claimed',
         since
       })
     }
