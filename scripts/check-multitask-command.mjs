@@ -24,6 +24,11 @@
 //       `command/done` (`kind: 'success'`) under one pairing id — and no
 //       model-visible user message or turn records the command line (the
 //       command never reaches the model).
+//   (f) while a real model turn is running, `/multitask` settles wholly
+//       inside that turn without changing its input, opening another turn,
+//       or producing any followup/steer/abort effect;
+//   (g) a real File dropped onto the composer is admitted with `/multitask`
+//       and the command settles successfully without persisting its content.
 //
 // Because the composed profile mounts the patch.yml insert rows through the
 // dev userData's profile node_modules, and those plugin links are shared
@@ -66,6 +71,10 @@ const POST_TEARDOWN_GRACE_MS = 20_000
 const EPOCH = Date.now()
 const OBJECTIVE_A = `research the multitask command scenario A ${EPOCH}`
 const OBJECTIVE_B = `implement the multitask command scenario B ${EPOCH}`
+const BUSY_PROMPT = `Use the terminal twice in two separate sequential tool calls: first run "sleep 1", then run "sleep 45". Do not combine the calls. After both complete, reply exactly "busy-turn probe complete". Scenario ${EPOCH}.`
+const OBJECTIVE_BUSY = `observe busy turn non-interruption ${EPOCH}`
+const OBJECTIVE_ATTACHMENT = `observe attachment admission ${EPOCH}`
+const ATTACHMENT_NAME = `multitask-scenario-${EPOCH}.txt`
 
 const projectRoot = join(import.meta.dirname, '..')
 
@@ -217,6 +226,26 @@ const PAGE_HELPERS = `
         state: el.getAttribute('data-state'),
         title: el.textContent ?? ''
       }))
+    },
+    dropAttachment(name) {
+      const file = new File(['attachment admission sentinel ' + name], name, { type: 'text/plain' })
+      const transfer = new DataTransfer()
+      transfer.items.add(file)
+      return document.dispatchEvent(new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer
+      })) === false
+    },
+    attachmentState(name) {
+      const card = [...document.querySelectorAll('[title]')].find((el) => el.getAttribute('title') === name)
+      if (card === undefined) return null
+      const text = card.textContent ?? ''
+      return { text, ready: !text.toLowerCase().includes('uploading') && !text.toLowerCase().includes('failed') }
+    },
+    turnRunning() {
+      const card = document.querySelector('[data-composer-card]')
+      return card !== null && card.querySelector('button svg rect') !== null
     }
   }
   'ready'
@@ -454,6 +483,11 @@ function findScenarioLog(modifiedSince) {
   return undefined
 }
 
+function isBusyPromptEvent(event) {
+  const text = JSON.stringify(event.data ?? {})
+  return text.includes('busy-turn probe complete') && text.includes(String(EPOCH))
+}
+
 // ---------------------------------------------------------------------------
 // Process-tree cleanup (verbatim approach of scripts/check-multitask-mount.mjs):
 // only descendants of the child this script spawned.
@@ -609,7 +643,7 @@ try {
     async () => {
       if ((await evaluate(endpoint, 'document.querySelector("[data-input-scroll]") !== null')) !== true) return false
       if ((await evaluate(endpoint, PAGE_HELPERS)) !== 'ready') return false
-      return true
+      return await pageCall(endpoint, 'focusComposer')
     },
     'the composer to become interactive',
     RENDERER_DEADLINE_MS
@@ -715,6 +749,89 @@ try {
   }
   log(`check-multitask-command: second invocation rendered the ${`MT-${idB}`} success card`)
 
+  // Phase 3e: start a real model turn, confirm the composed app exposes its
+  // running controls before invoking the command, keep the command wholly
+  // inside that turn, then prove the complete ordering in the durable log.
+  await typeLine(endpoint, BUSY_PROMPT)
+  await pressEnter(endpoint)
+  await evaluateUntil(
+    endpoint,
+    async () => await pageCall(endpoint, 'turnRunning'),
+    'the composer to expose the running-turn controls',
+    CARD_DEADLINE_MS
+  )
+  const busyStarted = await evaluateUntil(
+    endpoint,
+    async () => {
+      const found = findScenarioLog(startedAt)
+      if (found === undefined) return false
+      const ingress = found.events.find(
+        (event) => event.type === 'agent/inbox/spliced' && isBusyPromptEvent(event)
+      )
+      const start = found.events.find(
+        (event) => event.type === 'turn/start' && ingress !== undefined && event.seq > ingress.seq
+      )
+      const end = found.events.find(
+        (event) => event.type === 'turn/end' && start !== undefined
+          && event.data.turn === start.data.turn && event.seq > start.seq
+      )
+      return start !== undefined && end === undefined
+        ? { startSeq: start.seq, turn: start.data.turn }
+        : false
+    },
+    'a durable turn/start for the real busy-turn prompt (a configured live model is required)',
+    LOG_POLL_DEADLINE_MS
+  )
+  await typeLine(endpoint, `/multitask ${OBJECTIVE_BUSY}`)
+  await pressEnter(endpoint)
+  const busyCard = await evaluateUntil(
+    endpoint,
+    async () => {
+      const cards = await pageCall(endpoint, 'commandCards')
+      return cards.find((card) => card.state === 'ok' && card.title.includes(OBJECTIVE_BUSY)) ?? false
+    },
+    'the busy-turn multitask success card to render',
+    CARD_DEADLINE_MS
+  )
+  if (!busyCard.title.includes('queued')) fail('the busy-turn command card is not a queued success result')
+  if (!(await pageCall(endpoint, 'turnRunning'))) {
+    fail('the real model turn was no longer running when the busy-turn command settled')
+  }
+  log(`check-multitask-command: busy-turn command settled after durable turn/start seq ${busyStarted.startSeq} while the real model turn remained running`)
+
+  // The attachment intake is disabled while a model turn is running. Wait
+  // for this same real turn to finish before exercising the document-level
+  // drop route with a genuine browser File.
+  await evaluateUntil(
+    endpoint,
+    async () => !(await pageCall(endpoint, 'turnRunning')),
+    'the real busy turn to complete',
+    RENDERER_DEADLINE_MS
+  )
+
+  // Phase 3f: attachment admission through the real composer's drop intake.
+  const dropHandled = await pageCall(endpoint, 'dropAttachment', JSON.stringify(ATTACHMENT_NAME))
+  if (!dropHandled) fail('the synthetic DataTransfer drop was not accepted by the composer document route')
+  await evaluateUntil(
+    endpoint,
+    async () => (await pageCall(endpoint, 'attachmentState', JSON.stringify(ATTACHMENT_NAME)))?.ready === true,
+    'the dropped attachment to finish staging in the composer',
+    CARD_DEADLINE_MS
+  )
+  await typeLine(endpoint, `/multitask ${OBJECTIVE_ATTACHMENT}`)
+  await pressEnter(endpoint)
+  const attachmentCard = await evaluateUntil(
+    endpoint,
+    async () => {
+      const cards = await pageCall(endpoint, 'commandCards')
+      return cards.find((card) => card.state === 'ok' && card.title.includes(OBJECTIVE_ATTACHMENT)) ?? false
+    },
+    'the attachment-bearing multitask success card to render',
+    CARD_DEADLINE_MS
+  )
+  if (!attachmentCard.title.includes('queued')) fail('the attachment-bearing command card is not a queued success result')
+  log(`check-multitask-command: attachment-bearing invocation admitted ${ATTACHMENT_NAME} and rendered a success card`)
+
   // Phase 4: the durable session log on disk. Buffers drain at ordinary
   // checkpoints, so poll live first; teardown below also forces a drain and
   // the post-teardown pass re-checks before this script reports. Assertions
@@ -726,20 +843,25 @@ try {
     // The two task events of THIS scenario, in append order.
     const taskA = events.find((event) => event.type === 'multitask/task' && event.data.objective === OBJECTIVE_A)
     const taskB = events.find((event) => event.type === 'multitask/task' && event.data.objective === OBJECTIVE_B)
-    if (taskA === undefined || taskB === undefined) {
+    const taskBusy = events.find((event) => event.type === 'multitask/task' && event.data.objective === OBJECTIVE_BUSY)
+    const taskAttachment = events.find((event) => event.type === 'multitask/task' && event.data.objective === OBJECTIVE_ATTACHMENT)
+    if (taskA === undefined || taskB === undefined || taskBusy === undefined || taskAttachment === undefined) {
       fail(`multitask/task events for this scenario's objectives are missing from the log: ${file}`)
     }
-    for (const [task, id] of [[taskA, `MT-${idA}`], [taskB, `MT-${idB}`]]) {
+    for (const task of [taskA, taskB, taskBusy, taskAttachment]) {
       const keys = Object.keys(task.data).sort()
       if (JSON.stringify(keys) !== JSON.stringify(['createdAt', 'id', 'objective', 'phase'])) {
         fail(`multitask/task data shape is not the frozen shape: ${JSON.stringify(keys)}`)
       }
-      if (task.data.id !== id || task.data.phase !== 'queued') {
+      if (task.data.phase !== 'queued') {
         fail(`multitask/task event mismatch: ${JSON.stringify(task.data).slice(0, 300)}`)
       }
       if (Number.isNaN(new Date(task.data.createdAt).getTime())) {
         fail(`multitask/task createdAt is not an ISO timestamp: ${JSON.stringify(task.data.createdAt)}`)
       }
+    }
+    if (taskA.data.id !== `MT-${idA}` || taskB.data.id !== `MT-${idB}`) {
+      fail(`multitask/task ids do not match their rendered cards: ${taskA.data.id}, ${taskB.data.id}`)
     }
 
     // Lifecycle pairing: run -> task -> done under one commandId, twice; the
@@ -747,14 +869,20 @@ try {
     const dones = events.filter((event) => event.type === 'command/done' && event.data.commandId !== undefined)
     const runA = events.find((event) => event.type === 'command/run' && event.data.name === 'multitask' && event.data.args === ` ${OBJECTIVE_A}`)
     const runB = events.find((event) => event.type === 'command/run' && event.data.name === 'multitask' && event.data.args === ` ${OBJECTIVE_B}`)
-    if (runA === undefined || runB === undefined) {
+    const runBusy = events.find((event) => event.type === 'command/run' && event.data.name === 'multitask' && event.data.args === ` ${OBJECTIVE_BUSY}`)
+    const runAttachment = events.find((event) => event.type === 'command/run' && event.data.name === 'multitask' && event.data.args === ` ${OBJECTIVE_ATTACHMENT}`)
+    if (runA === undefined || runB === undefined || runBusy === undefined || runAttachment === undefined) {
       fail('this scenario\'s multitask command/run events are missing from the log')
     }
     // The rejected invocation is the empty-args multitask run strictly between
     // this scenario's A-done and B-run records.
     const doneA = dones.find((candidate) => candidate.data.commandId === runA.data.commandId)
     const doneB = dones.find((candidate) => candidate.data.commandId === runB.data.commandId)
-    if (doneA === undefined || doneB === undefined) fail('no command/done paired with this scenario\'s command/run records')
+    const doneBusy = dones.find((candidate) => candidate.data.commandId === runBusy.data.commandId)
+    const doneAttachment = dones.find((candidate) => candidate.data.commandId === runAttachment.data.commandId)
+    if ([doneA, doneB, doneBusy, doneAttachment].some((done) => done === undefined)) {
+      fail('no command/done paired with this scenario\'s command/run records')
+    }
     const rejected = events.find(
       (event) => event.type === 'command/run' && event.data.name === 'multitask'
         && typeof event.data.args === 'string' && event.data.args.trim() === ''
@@ -797,6 +925,62 @@ try {
     // Ordering across invocations: the first task precedes the second.
     if (!(taskA.seq < taskB.seq)) fail('multitask/task events are out of order (objective A must precede objective B)')
 
+    // Busy-turn public-seam evidence: the original prompt is the sole human
+    // input for one turn; run -> task -> done occurs strictly inside it; no
+    // additional turn, queued/spliced message, interruption, or named control
+    // effect is attributable to the command.
+    const busyIngress = events.find(
+      (event) => event.type === 'agent/inbox/spliced' && isBusyPromptEvent(event)
+    )
+    const busyStart = events.find(
+      (event) => event.type === 'turn/start' && busyIngress !== undefined && event.seq > busyIngress.seq
+    )
+    const busyMessage = events.find(
+      (event) => event.type === 'user/message' && busyStart !== undefined && event.seq > busyStart.seq
+        && isBusyPromptEvent(event)
+    )
+    const busyEnd = events.find(
+      (event) => event.type === 'turn/end' && busyStart !== undefined
+        && event.data.turn === busyStart.data.turn && event.seq > busyStart.seq
+    )
+    if (busyIngress === undefined || busyMessage === undefined || busyStart === undefined || busyEnd === undefined) {
+      fail('the real busy turn lacks its original inbox input, user/message, turn/start, or matching turn/end')
+    }
+    if (!(busyIngress.seq < busyStart.seq && busyStart.seq < busyMessage.seq && busyStart.seq < runBusy.seq
+      && runBusy.seq < taskBusy.seq
+      && taskBusy.seq < doneBusy.seq && doneBusy.seq < busyEnd.seq)) {
+      fail(`busy-turn ordering mismatch: ingress ${busyIngress.seq}, start ${busyStart.seq}, message ${busyMessage.seq}, run ${runBusy.seq}, task ${taskBusy.seq}, done ${doneBusy.seq}, end ${busyEnd.seq}`)
+    }
+    const busyWindowEffects = events.filter((event) => event.seq > runBusy.seq && event.seq < busyEnd.seq
+      && (event.type === 'turn/start' || event.type === 'user/message' || event.type === 'agent/inbox/spliced'
+        || event.type === 'subagent/descriptor' || /(followup|steer|abort)/iu.test(event.type)))
+    if (busyWindowEffects.length > 0) {
+      fail(`the busy-turn command changed the running turn: ${busyWindowEffects.map((event) => `${event.seq}:${event.type}`).join(', ')}`)
+    }
+    if (busyEnd.data.reason?.kind === 'interrupted') fail('the real busy turn ended as interrupted')
+    if (doneBusy.data.kind !== 'success') fail(`the busy-turn command settled as ${JSON.stringify(doneBusy.data.kind)}`)
+    log(`check-multitask-command: PASS busy-turn public seam (turn ${busyStart.data.turn}: ${busyStart.seq} < command/run ${runBusy.seq} < multitask/task ${taskBusy.seq} < command/done ${doneBusy.seq} < turn/end ${busyEnd.seq}; original input unchanged; no queued message/followup/steer/abort/researcher)`)
+
+    // Attachment admission public-seam evidence: lifecycle success encloses
+    // exactly the task event, whose frozen payload cannot persist or forward
+    // the dropped file name/content.
+    if (!(runAttachment.seq < taskAttachment.seq && taskAttachment.seq < doneAttachment.seq)) {
+      fail(`attachment command ordering mismatch: ${runAttachment.seq}/${taskAttachment.seq}/${doneAttachment.seq}`)
+    }
+    if (doneAttachment.data.kind !== 'success') {
+      fail(`the attachment-bearing invocation settled as ${JSON.stringify(doneAttachment.data.kind)}`)
+    }
+    const attachmentPairText = events
+      .filter((event) => event.seq >= runAttachment.seq && event.seq <= doneAttachment.seq)
+      .map((event) => JSON.stringify(event.data ?? {})).join('\n')
+    if (/does not accept attachments/iu.test(attachmentPairText)) {
+      fail('the attachment-bearing command lifecycle contains an attachment rejection')
+    }
+    if (attachmentPairText.includes(ATTACHMENT_NAME) || attachmentPairText.includes('attachment admission sentinel')) {
+      fail('the attachment-bearing command persisted or forwarded attachment content')
+    }
+    log(`check-multitask-command: PASS attachment admission public seam (${runAttachment.seq} command/run < ${taskAttachment.seq} multitask/task < ${doneAttachment.seq} command/done(success); no attachment rejection/content)`)
+
     // The command never reaches the model: the model-visible surface (user
     // messages, turns) carries neither the raw command line nor an objective,
     // and no turn/start falls in any invocation's execution window (the
@@ -806,7 +990,8 @@ try {
     for (const event of events) {
       if (!['user/message', 'turn/start', 'assistant/message'].includes(event.type)) continue
       const text = JSON.stringify(event.data ?? {})
-      if (text.includes('/multitask') || text.includes(OBJECTIVE_A) || text.includes(OBJECTIVE_B)) {
+      if (text.includes('/multitask') || text.includes(OBJECTIVE_A) || text.includes(OBJECTIVE_B)
+        || text.includes(OBJECTIVE_BUSY) || text.includes(OBJECTIVE_ATTACHMENT)) {
         fail(`the command line or an objective leaked into the model-visible ${event.type} event: ${text.slice(0, 200)}`)
       }
     }
@@ -818,7 +1003,7 @@ try {
         fail(`a turn/start (seq ${intruding.seq}) opened inside the command window (${run.seq}→${done.seq}): the command started a model turn`)
       }
     }
-    log(`check-multitask-command: session log verified (${events.length} events, 2 multitask/task, pairing + ordering + no model turn): ${file}`)
+    log(`check-multitask-command: session log verified (${events.length} events, 4 multitask/task, pairing + ordering + public-seam busy turn and attachment admission): ${file}`)
   }
 
   let verified = false
