@@ -9,8 +9,8 @@
 // Only the model adapter is scripted, matching the frozen
 // `multitask_claim_enforcement_gate` seam. The script asserts full history —
 // one actionable denial, recovery, live claim table, host release after holder
-// success before retry, no double-deny, and the Bash tier-2 footnote folded
-// from live session events — not a helper call or a final-state snapshot.
+// success and abort before retry, no double-deny, and the Bash tier-2 footnote
+// folded from live session events — not a helper call or a final-state snapshot.
 //
 // Exit 0 only when every observation succeeded.
 
@@ -104,6 +104,14 @@ function isWriterACall(call) {
 
 function isWriterBCall(call) {
   return userText(call.request).includes('writer B stays live to claim files')
+}
+
+function isAbortHolderCall(call) {
+  return userText(call.request).includes('abort holder stays live to claim files')
+}
+
+function isAbortRetryCall(call) {
+  return userText(call.request).includes('abort retry writer stays live to claim files')
 }
 
 function gate() {
@@ -325,7 +333,11 @@ async function compose(options = {}) {
   }
 }
 
-async function launchTwoHeldChildren(app, hold) {
+async function launchTwoHeldChildren(app, hold, prompts = {
+  a: 'writer A stays live to claim files',
+  b: 'writer B stays live to claim files',
+  labels: ['writer-a', 'writer-b']
+}) {
   await runCommand(app.ctx, app.agent, '/multitask implement shared file A')
   const busy = await runTool(app.ctx, app.agent, 'write', {
     file_path: path.join(app.home, 'parent-busy.ts'),
@@ -335,29 +347,106 @@ async function launchTwoHeldChildren(app, hold) {
   await runCommand(app.ctx, app.agent, '/multitask implement shared file B')
   const startA = await app.ctx.subagents.startContinuable({
     provider: 'spawn',
-    label: 'writer-a',
+    label: prompts.labels[0],
     request: {
-      prompt: [{ type: 'text', text: 'writer A stays live to claim files' }],
+      prompt: [{ type: 'text', text: prompts.a }],
       parent: app.agent
     },
     signal: new AbortController().signal
   })
   const startB = await app.ctx.subagents.startContinuable({
     provider: 'spawn',
-    label: 'writer-b',
+    label: prompts.labels[1],
     request: {
-      prompt: [{ type: 'text', text: 'writer B stays live to claim files' }],
+      prompt: [{ type: 'text', text: prompts.b }],
       parent: app.agent
     },
     signal: new AbortController().signal
   })
   const childIds = [String(startA.childId), String(startB.childId)]
-  await waitFor(() => childIds.every((id) => app.ctx.agents.get(SessionId(id)) !== undefined), 'live writer agents')
+  await waitFor(
+    () => childIds.every((id) => app.ctx.agents.get(SessionId(id)) !== undefined),
+    `live writer agents (${prompts.a})`
+  )
   return {
     childA: app.ctx.agents.get(SessionId(childIds[0])),
     childB: app.ctx.agents.get(SessionId(childIds[1])),
     childIds,
     hold
+  }
+}
+
+async function runAbortScenario() {
+  const holdAbort = gate()
+  const holdRetry = gate()
+  const ends = new Map()
+  const app = await compose({
+    respond: async (call) => {
+      if (isAbortHolderCall(call)) {
+        await holdUntil(call.request.signal, holdAbort.promise)
+        return 'abort holder completed'
+      }
+      if (isAbortRetryCall(call)) {
+        await holdUntil(call.request.signal, holdRetry.promise)
+        return 'abort retry writer held'
+      }
+      if (isResearcherCall(call)) return STRUCTURED_REPORT
+      return 'parent ack'
+    }
+  })
+  app.ctx.on('subagent/end', (info) => {
+    ends.set(String(info.id), String(info.stopReason ?? ''))
+  })
+  try {
+    const pair = await launchTwoHeldChildren(app, holdAbort, {
+      a: 'abort holder stays live to claim files',
+      b: 'abort retry writer stays live to claim files',
+      labels: ['abort-holder', 'abort-retry']
+    })
+    const claimed = await runTool(app.ctx, pair.childA, 'claim_files', {
+      paths: ['src/aborted.ts'],
+      taskId: 'MT-1'
+    })
+    if (claimed.isError) fail(`abort holder claim failed: ${claimed.error?.message}`)
+    const ownerWrite = await runTool(app.ctx, pair.childA, 'write', {
+      file_path: path.join(app.home, 'src/aborted.ts'),
+      content: 'owned before abort'
+    })
+    if (ownerWrite.isError) fail(`abort holder own write failed: ${ownerWrite.error?.message}`)
+    const blocked = await runTool(app.ctx, pair.childB, 'write', {
+      file_path: path.join(app.home, 'src/aborted.ts'),
+      content: 'must wait for abort'
+    })
+    if (!blocked.isError) fail('retry writer was not denied before holder abort')
+    if (!String(blocked.error?.message ?? '').includes('MT-1')) {
+      fail(`abort denial did not identify holder: ${blocked.error?.message}`)
+    }
+
+    await app.ctx.subagents.drainContinuableChildren(app.agent, [SessionId(pair.childIds[0])])
+    await waitFor(() => ends.get(pair.childIds[0]) === 'aborted', 'holder settled as aborted')
+    await waitFor(
+      () => !liveClaimTable(app.agent).some((claim) => claim.path === 'src/aborted.ts'),
+      'holder claims released after abort'
+    )
+    if (!claimEvents(app.agent).some((event) => event.path === 'src/aborted.ts' && event.state === 'released')) {
+      fail('host did not append a released claim after holder abort')
+    }
+    const reread = await runTool(app.ctx, pair.childB, 'read', {
+      file_path: path.join(app.home, 'src/aborted.ts')
+    })
+    if (reread.isError) fail(`retry read after host abort release failed: ${reread.error?.message}`)
+    const retry = await runTool(app.ctx, pair.childB, 'write', {
+      file_path: path.join(app.home, 'src/aborted.ts'),
+      content: 'retry after abort'
+    })
+    if (retry.isError) fail(`retry after host abort release failed: ${retry.error?.message}`)
+    if (await readFile(path.join(app.home, 'src/aborted.ts'), 'utf8') !== 'retry after abort') {
+      fail('retry after holder abort did not land')
+    }
+  } finally {
+    holdAbort.open()
+    holdRetry.open()
+    await app.dispose().catch(() => {})
   }
 }
 
@@ -480,6 +569,8 @@ async function runScenario() {
       fail('unrelated live claim disappeared after the retry')
     }
 
+    await runAbortScenario()
+
     const other = await compose({ sessionId: 'session-other' })
     try {
       await runCommand(other.ctx, other.agent, '/multitask unrelated session')
@@ -494,7 +585,7 @@ async function runScenario() {
 
     holdB.open()
     await app.agent.whenIdle()
-    log('check-multitask-claim-enforcement: PASS collision, recovery, table, success release, bash scope')
+    log('check-multitask-claim-enforcement: PASS collision, recovery, table, success+abort release, bash scope')
   } finally {
     holdA.open()
     holdB.open()
