@@ -7,6 +7,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ContentBlock, UserMessage } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
+import type { MultitaskClaimRecord } from './claims.js'
 
 /** Jobs-plugin anti-self-excitation default. */
 export declare const DEFAULT_MAX_CONSECUTIVE_WAKES: 3
@@ -39,8 +40,16 @@ export interface MultitaskDriverTask {
 
 /** Public driver seams used by the host plugin. */
 export interface MultitaskRoundDriver {
-  queueHandoff(agent: Agent, task: MultitaskDriverTask): void
+  queueHandoff(
+    agent: Agent,
+    task: MultitaskDriverTask,
+    claims?: readonly Pick<MultitaskClaimRecord, 'path' | 'taskId' | 'ownerSessionId' | 'state'>[]
+  ): void
   notifySettlement(agent: Agent, task?: MultitaskDriverTask): void
+  refreshHandoffTable?(
+    agent: Agent,
+    claims?: readonly Pick<MultitaskClaimRecord, 'path' | 'taskId' | 'ownerSessionId' | 'state'>[]
+  ): void
 }
 
 declare module '@deepseek-ai/dsh-llm' {
@@ -60,7 +69,10 @@ export declare function resolveRoundDriverConfig(
 ): ResolvedRoundDriverConfig
 
 /** Render the model-visible orchestrator handoff for one task. */
-export declare function renderHandoffPrompt(task: MultitaskDriverTask): ContentBlock[]
+export declare function renderHandoffPrompt(
+  task: MultitaskDriverTask,
+  claims?: readonly Pick<MultitaskClaimRecord, 'path' | 'taskId' | 'ownerSessionId' | 'state'>[]
+): ContentBlock[]
 
 /** Latest fold-derived task on a session log, if any. */
 export declare function latestTask(session: Session): MultitaskDriverTask | undefined

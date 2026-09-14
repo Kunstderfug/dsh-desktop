@@ -61,6 +61,28 @@ declare module '@deepseek-ai/dsh-session/types' {
             stopReason?: MultitaskResearchStopReason
         }
         /**
+         * One claim-enforcement denial. Log-only; folded into the task card as a
+         * boundary-intervention note. Does not replace the claim registry.
+         */
+        'multitask/denial': {
+            /** Task id that should surface the intervention note. */
+            id: string
+            /** Optional task id alias used by the card fold. */
+            taskId?: string
+            /** Normalized workspace-relative path that was denied. */
+            path: string
+            /** Live task that holds the path. */
+            holderTaskId: string
+            /** Actionable reason naming path, holder, and remedy. */
+            reason: string
+            /** Same reason, folded as a visible phase note. */
+            note?: string
+            /** Card fold marker; not a lifecycle chip. */
+            phase?: string
+            /** ISO-8601 timestamp of this append. */
+            createdAt: string
+        }
+        /**
          * One claim or release state change. Log-only, folded by the
          * `multitask/claims` projection unit. Identity is the workspace-relative
          * path plus task id and owner session id.
@@ -132,10 +154,20 @@ export {
   CLAIM_TOOL_NAMES,
   ClaimConflictError,
   MultitaskClaimsService,
+  effectiveClaims,
   normalizeClaimPath,
   pathsOverlap,
-  registerClaims
+  registerClaims,
+  resolveMultitaskSession
 } from './claims.js'
+export {
+  BASH_TIER2_SCOPE_NOTE,
+  CLAIM_REMEDY,
+  DENIAL_EVENT_TYPE,
+  GUARDED_TOOL_PATH_ARGUMENTS,
+  formatClaimDenial,
+  registerClaimsGuard
+} from './claims-guard.js'
 export type {
   OrchestratorModeIntent,
   OrchestratorModeOutcome,

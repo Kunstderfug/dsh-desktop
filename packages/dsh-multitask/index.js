@@ -1,6 +1,7 @@
 /**
  * Host half of the [multitask] plugin (issues #3 scaffold + #4 command +
- * #5 researcher + #8 claims registry + #6 round driver + #7 orchestrator mode).
+ * #5 researcher + #8 claims registry + #9 claim enforcement + #6 round
+ * driver + #7 orchestrator mode).
  *
  * This package is the permanent mount target of every later multitask
  * ticket. The composed desktop profile loads it through the
@@ -25,10 +26,11 @@
  *   `researched` / `research-failed`. The Harness SubagentRuntime remains
  *   the child lifecycle and persistence owner. The parent retrieves the
  *   full structured report through `sendMessage`, and
- * - the file-claim registry (issue #8): a log-backed `multitask.claims`
- *   service, a `multitask/claims` projection unit, and agent-scoped
- *   `claim_files` / `release_files` / `list_file_claims` tools. Write/edit
- *   boundary enforcement is issue #9 and is not implemented here, and
+ * - the file-claim registry (issue #8) plus claim enforcement (issue #9):
+ *   a log-backed `multitask.claims` service, agent-scoped claim tools, a
+ *   host claims guard on `tools/pre-execute` and fs write/edit intents,
+ *   busy-parent pre-claim at `/multitask`, live claim table in handoffs,
+ *   and host-side release-on-settle, and
  * - the round driver (issue #6): when `enabled: true`, `/multitask` queues
  *   one `{kind:'multitask', taskId}` followup, `agent/pre-step` validates or
  *   rejects that reservation, settlement while idle requests a bounded next
@@ -48,7 +50,8 @@
  */
 
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
-import { registerClaims } from './claims.js'
+import { effectiveClaims, registerClaims } from './claims.js'
+import { registerClaimsGuard } from './claims-guard.js'
 import { registerOrchestratorMode } from './orchestrator-mode.js'
 import {
   RESEARCHER_LABEL,
@@ -56,6 +59,7 @@ import {
   mapResearchSettlement
 } from './researcher.js'
 import {
+  latestTask,
   registerRoundDriver,
   resolveRoundDriverConfig
 } from './round-driver.js'
@@ -78,6 +82,26 @@ export {
   renderHandoffPrompt,
   resolveRoundDriverConfig
 } from './round-driver.js'
+export {
+  CLAIM_CONFLICT_CODE,
+  CLAIM_EVENT_TYPE,
+  CLAIM_TOOL_NAMES,
+  ClaimConflictError,
+  MultitaskClaimsService,
+  effectiveClaims,
+  normalizeClaimPath,
+  pathsOverlap,
+  registerClaims,
+  resolveMultitaskSession
+} from './claims.js'
+export {
+  BASH_TIER2_SCOPE_NOTE,
+  CLAIM_REMEDY,
+  DENIAL_EVENT_TYPE,
+  GUARDED_TOOL_PATH_ARGUMENTS,
+  formatClaimDenial,
+  registerClaimsGuard
+} from './claims-guard.js'
 
 /** Stable Cordis plugin name. */
 export const name = 'dsh-multitask'
@@ -93,6 +117,53 @@ const STARTUP_LINE = '[multitask] plugin active'
 
 /** Live child id → the parent session and minted task awaiting settlement. */
 const pendingResearchers = new Map()
+
+/** Child session id → parent session id for host-side release-on-settle. */
+const childParents = new Map()
+
+/**
+ * Remember the parent session that owns a child, for settle-time release.
+ *
+ * @param childId - durable child session id.
+ * @param parentId - parent session id.
+ */
+function rememberChildParent(childId, parentId) {
+  if (childId == null || parentId == null) return
+  childParents.set(String(childId), String(parentId))
+}
+
+/**
+ * Parent session whose log holds claims for a settled child.
+ *
+ * @param ctx - host context.
+ * @param childId - durable child session id.
+ */
+function sessionForSettledChild(ctx, childId) {
+  const pending = pendingResearchers.get(String(childId))
+  if (pending !== undefined) return pending.session
+  const child = ctx.get?.('agents')?.get(childId)
+  const parentId = child?.session.header.parentSession ?? childParents.get(String(childId))
+  if (parentId === undefined) return undefined
+  return ctx.get?.('sessions')?.get(parentId) ?? ctx.get?.('agents')?.get(parentId)?.session
+}
+
+/**
+ * Host-side release of every claim the settled child still holds.
+ * Skip ordinary continuable turn completion and composition teardown so
+ * resume can still expire dead owners through the existing fold.
+ *
+ * @param ctx - host context.
+ * @param info - `subagent/end` payload.
+ */
+function releaseSettledOwnerClaims(ctx, info) {
+  const stop = String(info?.stopReason ?? '')
+  if (stop === 'completed' || stop === 'max-tokens' || stop === 'refusal') return
+  const service = ctx.get?.('multitask.claims') ?? ctx['multitask.claims']
+  const session = sessionForSettledChild(ctx, info.id)
+  if (service == null || session == null) return
+  if (ctx.get?.('agents')?.get(session.id) === undefined) return
+  return service.releaseAll(session, String(info.id))
+}
 
 /**
  * Fold the session log into the next per-session task ordinal.
@@ -139,6 +210,15 @@ function recordResearchSettlement(info, driver) {
   driver?.notifySettlement(pending.agent, pending.task)
 }
 
+async function settleChild(ctx, info, driver) {
+  try {
+    recordResearchSettlement(info, driver)
+  } finally {
+    await releaseSettledOwnerClaims(ctx, info)
+    childParents.delete(String(info.id))
+  }
+}
+
 /**
  * Execute one `/multitask` invocation host-side.
  *
@@ -164,14 +244,34 @@ async function executeMultitaskCommand(ctx, invocation, driver, mode) {
     }
   }
 
+  const session = invocation.agent.session
+  const busy = latestTask(session)
   const task = {
-    id: nextTaskId(invocation.agent.session),
+    id: nextTaskId(session),
     objective,
     phase: 'queued',
     createdAt: new Date().toISOString()
   }
-  invocation.agent.session.append('multitask/task', task)
+  session.append('multitask/task', task)
   mode?.noteTaskOpened(invocation.agent, task.id)
+  const claims = ctx.get?.('multitask.claims')
+  if (busy !== undefined && typeof claims?.preclaimTouched === 'function') {
+    try {
+      await claims.preclaimTouched(session, String(session.id), busy.id)
+    } catch {
+      /* a conflicting live claim still protects the busy-parent path */
+    }
+  }
+  let liveClaims = effectiveClaims(session)
+  if (typeof claims?.list === 'function') {
+    try {
+      liveClaims = (await claims.list(session)).claims
+    } catch {
+      liveClaims = effectiveClaims(session)
+    }
+  }
+  driver?.refreshHandoffTable?.(invocation.agent, liveClaims)
+  driver?.queueHandoff(invocation.agent, task, liveClaims)
 
   let researcherLine = ''
   const subagents = ctx.get?.('subagents')
@@ -209,8 +309,6 @@ async function executeMultitaskCommand(ctx, invocation, driver, mode) {
       researcherLine = `Researcher launch failed; research phase: research-failed.`
     }
   }
-
-  driver?.queueHandoff(invocation.agent, task)
 
   return {
     kind: 'success',
@@ -255,11 +353,16 @@ export function apply(ctx, config) {
   KNOWN_SESSION_EVENT_TYPES.add('multitask/task')
   KNOWN_SESSION_EVENT_TYPES.add('multitask/research')
   KNOWN_SESSION_EVENT_TYPES.add('multitask/claims')
+  KNOWN_SESSION_EVENT_TYPES.add('multitask/denial')
   KNOWN_SESSION_EVENT_TYPES.add('multitask/mode')
+  registerClaimsGuard(ctx)
   const driverConfig = resolveRoundDriverConfig(config)
   const driver = driverConfig.enabled ? registerRoundDriver(ctx, driverConfig) : undefined
   const mode = registerOrchestratorMode(ctx)
-  ctx.on?.('subagent/end', (info) => recordResearchSettlement(info, driver))
+  ctx.on?.('agent/created', ({ agent }) => {
+    rememberChildParent(agent.session.id, agent.session.header.parentSession)
+  })
+  ctx.on?.('subagent/end', (info) => settleChild(ctx, info, driver))
   registerClaims(ctx)
   if (typeof ctx.commands?.register !== 'function') return
   ctx.commands.register({

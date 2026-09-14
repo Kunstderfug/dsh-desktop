@@ -4,8 +4,8 @@
  *
  * Persistence authority is the receiving session log. Effective claims are
  * the projection fold after dead-owner expiry consulted from real subagent
- * activity. Enforcement of writes/edits is issue #9 and is deliberately
- * absent here.
+ * activity. Issue #9 adds live policy helpers (release-all, touched-path
+ * pre-claim, holder lookup) used by the host claims guard.
  *
  * @module dsh-multitask/claims
  */
@@ -38,6 +38,7 @@ export const CLAIM_EVENT_TYPE = 'multitask/claims'
 
 const EMPTY_STATE = Object.freeze({ records: Object.freeze([]) })
 const EMPTY_VIEW = Object.freeze({ claims: Object.freeze([]) })
+const touchedBySession = new WeakMap()
 
 const claimRecordSchema = z.object({
   path: z.string(),
@@ -134,8 +135,32 @@ function resolveClaimsSession(ctx, agent) {
 
 function foldedClaims(ctx, session) {
   const state = ctx.get?.('sessionProjections')?.stateOf(session, CLAIM_EVENT_TYPE)
-  if (state === undefined) return []
+  if (state === undefined) return effectiveClaims(session)
   return state.records.filter(record => record.state === 'claimed')
+}
+
+/**
+ * Fold the session log into the live claim table without the projection unit.
+ *
+ * @param session - multitask-owning session log.
+ */
+export function effectiveClaims(session) {
+  const table = new Map()
+  for (const event of session.snapshotEvents()) {
+    if (event.type !== CLAIM_EVENT_TYPE) continue
+    const record = event.data
+    if (record?.path == null) continue
+    if (record.state === 'released') table.delete(record.path)
+    else table.set(record.path, record)
+  }
+  return [...table.values()].sort((left, right) => String(left.path).localeCompare(String(right.path)))
+}
+
+function ownerIsLive(ctx, session, claim, activity) {
+  if (String(claim.ownerSessionId) === String(session.id)) {
+    return ctx.get?.('agents')?.get(session.id) !== undefined
+  }
+  return activity.get(String(claim.ownerSessionId)) === 'running'
 }
 
 function applyClaims(state, event) {
@@ -196,7 +221,7 @@ export class MultitaskClaimsService extends Service {
     }
     const since = new Date().toISOString()
     for (const claim of live) {
-      if (this.#ownerIsLive(session, claim, activity)) continue
+      if (ownerIsLive(this.ctx, session, claim, activity)) continue
       session.append(CLAIM_EVENT_TYPE, {
         path: claim.path,
         taskId: claim.taskId,
@@ -290,12 +315,93 @@ export class MultitaskClaimsService extends Service {
     }
   }
 
-  #ownerIsLive(session, claim, activity) {
-    if (String(claim.ownerSessionId) === String(session.id)) {
-      return this.ctx.get?.('agents')?.get(session.id) !== undefined
+  /**
+   * Release every live claim held by one owner, optionally filtered by task.
+   *
+   * @param session - multitask-owning session log.
+   * @param ownerSessionId - settling agent session id.
+   * @param taskId - optional task id; omit to release every path this owner holds.
+   */
+  async releaseAll(session, ownerSessionId, taskId) {
+    await this.reconcile(session)
+    const live = foldedClaims(this.ctx, session)
+    const owner = String(ownerSessionId)
+    const mine = live.filter(claim =>
+      claim.ownerSessionId === owner
+      && (taskId == null || claim.taskId === taskId)
+    )
+    const since = new Date().toISOString()
+    const released = []
+    for (const claim of mine) {
+      session.append(CLAIM_EVENT_TYPE, {
+        path: claim.path,
+        taskId: claim.taskId,
+        ownerSessionId: claim.ownerSessionId,
+        state: 'released',
+        since
+      })
+      released.push(claim.path)
     }
-    return activity.get(String(claim.ownerSessionId)) === 'running'
+    return { released }
   }
+
+  /**
+   * Record a workspace path the session just touched through a host tool/fs event.
+   *
+   * @param session - multitask-owning session.
+   * @param rawPath - caller path from write/edit/intent.
+   */
+  recordTouched(session, rawPath) {
+    if (session == null) return
+    try {
+      const normalized = normalizeClaimPath(session.header.cwd, rawPath)
+      let set = touchedBySession.get(session)
+      if (set === undefined) {
+        set = new Set()
+        touchedBySession.set(session, set)
+      }
+      set.add(normalized)
+    } catch {
+      /* invalid paths are not claim identities */
+    }
+  }
+
+  /**
+   * Touched workspace-relative paths accumulated for this session.
+   *
+   * @param session - multitask-owning session.
+   */
+  touchedOf(session) {
+    return [...(touchedBySession.get(session) ?? [])]
+  }
+
+  /**
+   * Claim every currently touched path for the busy main task.
+   *
+   * @param session - multitask-owning session log.
+   * @param ownerSessionId - busy parent session id.
+   * @param taskId - the live busy task (MT-n).
+   */
+  async preclaimTouched(session, ownerSessionId, taskId) {
+    const paths = this.touchedOf(session)
+    if (paths.length === 0 || taskId == null || String(taskId).length === 0) {
+      return { claimed: [], idempotent: true }
+    }
+    return this.claim(session, ownerSessionId, taskId, paths)
+  }
+
+  /**
+   * Live holder of a path after expiry, if any.
+   *
+   * @param session - multitask-owning session log.
+   * @param rawPath - caller path.
+   */
+  async holderFor(session, rawPath) {
+    await this.reconcile(session)
+    const normalized = normalizeClaimPath(session.header.cwd, rawPath)
+    return foldedClaims(this.ctx, session).find(claim => pathsOverlap(claim.path, normalized))
+  }
+
 }
 
 function defineClaimFiles(ctx, service) {
@@ -428,6 +534,16 @@ function attachClaimTools(ctx, service, agent) {
   agent.ctx.tools.register(defineClaimFiles(ctx, service))
   agent.ctx.tools.register(defineReleaseFiles(ctx, service))
   agent.ctx.tools.register(defineListFileClaims(ctx, service))
+}
+
+/**
+ * Resolve the multitask-owning session for an agent, or `undefined`.
+ *
+ * @param ctx - host context.
+ * @param agent - invoking agent.
+ */
+export function resolveMultitaskSession(ctx, agent) {
+  return claimsSessionOrNull(ctx, agent)
 }
 
 /**
