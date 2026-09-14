@@ -56,6 +56,7 @@ const FORBIDDEN_PATHS = [
   'packages/dsh-multitask/',
   'src/'
 ]
+const TICKET_PATCH_COMMIT = '5963df78f5a15534633bb7e29666c1c836de8cac'
 
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
@@ -438,27 +439,38 @@ async function teardownDevApp() {
 }
 
 function assertForbiddenWork() {
-  const changed = execFileSync('git', ['diff', '--name-only', 'd7002964f93ae4a84832d4ec71d815292fc0bfe5'], {
-    cwd: projectRoot,
-    encoding: 'utf8'
-  })
-  const dirty = execFileSync('git', ['status', '--short'], { cwd: projectRoot, encoding: 'utf8' })
-  const all = `${changed}\n${dirty}`
-  if (/(^|\n)patches\//m.test(all) || /dsh-client-ui-/.test(all)) {
-    fail(`forbidden work touched patches/ or dsh-client-ui-*: ${all}`)
-  }
-  for (const prefix of FORBIDDEN_PATHS) {
-    if (all.split('\n').some((line) => line.includes(prefix) && !line.includes('dsh-multitask-client'))) {
-      if (prefix === 'packages/dsh-multitask/' && /packages\/dsh-multitask\//.test(all) && !/dsh-multitask-client/.test(lineSafe(all, prefix))) {
-        fail(`forbidden host lifecycle edit under ${prefix}: ${all}`)
-      }
-    }
+  // The integration head contains sibling ticket commits. Diffing from the
+  // common base therefore reports ticket #6's host files as #11 work. Keep
+  // the forbidden-work observation tied to #11's own patch identity, then
+  // include any staged/unstaged writes made while running this gate.
+  const ticketPatch = execFileSync(
+    'git',
+    ['diff', '--name-only', '--no-renames', `${TICKET_PATCH_COMMIT}^`, TICKET_PATCH_COMMIT],
+    { cwd: projectRoot, encoding: 'utf8' }
+  )
+  const dirty = execFileSync(
+    'git',
+    ['status', '--porcelain=v1', '--untracked-files=all'],
+    { cwd: projectRoot, encoding: 'utf8' }
+  )
+  const dirtyPaths = dirty
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => line.slice(3))
+    .join('\n')
+  const paths = `${ticketPatch}\n${dirtyPaths}`
+  const forbidden = paths
+    .split('\n')
+    .map((path) => path.trim())
+    .filter(Boolean)
+    .filter((path) =>
+      FORBIDDEN_PATHS.some((prefix) => path.startsWith(prefix)) ||
+      path.includes('dsh-client-ui-')
+    )
+  if (forbidden.length > 0) {
+    fail(`forbidden ticket-11 work touched host, upstream UI, RPC, or patches paths: ${forbidden.join('\n')}`)
   }
   log('check-multitask-task-card: PASS forbidden-work observation (no upstream UI, patches, host, or RPC edits)')
-}
-
-function lineSafe(all, prefix) {
-  return all.split('\n').filter((line) => line.includes(prefix)).join('\n')
 }
 
 function assertUniqueCard(cards, taskId, objective) {
