@@ -1,6 +1,6 @@
 /**
  * Host half of the [multitask] plugin (issues #3 scaffold + #4 command +
- * #5 researcher + #8 claims registry + #6 round driver).
+ * #5 researcher + #8 claims registry + #6 round driver + #7 orchestrator mode).
  *
  * This package is the permanent mount target of every later multitask
  * ticket. The composed desktop profile loads it through the
@@ -33,7 +33,14 @@
  *   one `{kind:'multitask', taskId}` followup, `agent/pre-step` validates or
  *   rejects that reservation, settlement while idle requests a bounded next
  *   round, and teardown cancels owned attempts. Off by default so #4/#5/#8
- *   keep their no-handoff mount.
+ *   keep their no-handoff mount, and
+ * - orchestrator mode (issue #7): per-agent logged `multitask/mode` events
+ *   folded by the `multitask-mode` projection into `{active, openTasks}`.
+ *   Task lifecycle proposes mode intent; the controller commits only after
+ *   an accepted `agent/pre-step`. While active, the named
+ *   `multitask:orchestrator` section is included and activation adds the
+ *   ticket-named narration to that accepted step. The tool catalog is
+ *   unchanged.
  *
  * The task-card chat node (issue #11) is a later ticket's seam.
  *
@@ -42,6 +49,7 @@
 
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import { registerClaims } from './claims.js'
+import { registerOrchestratorMode } from './orchestrator-mode.js'
 import {
   RESEARCHER_LABEL,
   buildResearcherStartSpec,
@@ -52,6 +60,16 @@ import {
   resolveRoundDriverConfig
 } from './round-driver.js'
 
+export {
+  MODE_EVENT_TYPE,
+  ORCHESTRATOR_GUIDANCE,
+  ORCHESTRATOR_SECTION_NAME,
+  PROJECTION_KEY,
+  OrchestratorModeController,
+  foldOpenTasks,
+  orchestratorModeProjectionDefinition,
+  registerOrchestratorMode
+} from './orchestrator-mode.js'
 export {
   DEFAULT_MAX_CONSECUTIVE_WAKES,
   isMultitaskHandoffSource,
@@ -132,9 +150,10 @@ function recordResearchSettlement(info, driver) {
  * @param ctx - host context that may expose `subagents`.
  * @param invocation - the registry's invocation for the receiving agent.
  * @param driver - optional enabled round driver.
+ * @param mode - optional orchestrator-mode controller.
  * @returns the settled CommandResult (text card, or validation error).
  */
-async function executeMultitaskCommand(ctx, invocation, driver) {
+async function executeMultitaskCommand(ctx, invocation, driver, mode) {
   const objective = invocation.rawInput.trim()
   if (objective.length === 0) {
     // Validation failure: no `multitask/task` is appended; only the
@@ -152,6 +171,7 @@ async function executeMultitaskCommand(ctx, invocation, driver) {
     createdAt: new Date().toISOString()
   }
   invocation.agent.session.append('multitask/task', task)
+  mode?.noteTaskOpened(invocation.agent, task.id)
 
   let researcherLine = ''
   const subagents = ctx.get?.('subagents')
@@ -207,8 +227,8 @@ async function executeMultitaskCommand(ctx, invocation, driver) {
 
 /**
  * Log the scaffold startup line, declare the multitask session-event
- * vocabulary, listen for researcher settlement, register claims, and
- * register `/multitask`.
+ * vocabulary, listen for researcher settlement, register claims, mount
+ * orchestrator mode, and register `/multitask`.
  *
  * The startup line goes straight to the Harness process stdout so it lands
  * in the desktop's `harness.log`. The event-vocabulary registration exists
@@ -235,8 +255,10 @@ export function apply(ctx, config) {
   KNOWN_SESSION_EVENT_TYPES.add('multitask/task')
   KNOWN_SESSION_EVENT_TYPES.add('multitask/research')
   KNOWN_SESSION_EVENT_TYPES.add('multitask/claims')
+  KNOWN_SESSION_EVENT_TYPES.add('multitask/mode')
   const driverConfig = resolveRoundDriverConfig(config)
   const driver = driverConfig.enabled ? registerRoundDriver(ctx, driverConfig) : undefined
+  const mode = registerOrchestratorMode(ctx)
   ctx.on?.('subagent/end', (info) => recordResearchSettlement(info, driver))
   registerClaims(ctx)
   if (typeof ctx.commands?.register !== 'function') return
@@ -247,6 +269,6 @@ export function apply(ctx, config) {
       hint: '<objective>',
       attachments: true
     },
-    handler: (invocation) => executeMultitaskCommand(ctx, invocation, driver)
+    handler: (invocation) => executeMultitaskCommand(ctx, invocation, driver, mode)
   })
 }

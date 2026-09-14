@@ -4,9 +4,9 @@
  * Declares the plugin's runtime exports for type-only consumers (the
  * implementation module `./index.js` is plain JavaScript) and augments the
  * session event vocabulary with the plugin-owned `multitask/task` mint,
- * `multitask/research` researcher lifecycle, and `multitask/claims` registry
- * records — the same `declare module` pattern `@deepseek-ai/dsh-plan-mode`
- * uses for `plan/mode`.
+ * `multitask/research` researcher lifecycle, `multitask/claims` registry
+ * records, and `multitask/mode` orchestrator collaboration state — the same
+ * `declare module` pattern `@deepseek-ai/dsh-plan-mode` uses for `plan/mode`.
  *
  * @module dsh-multitask
  */
@@ -77,6 +77,18 @@ declare module '@deepseek-ai/dsh-session/types' {
             /** ISO-8601 timestamp of this append. */
             since: string
         }
+        /**
+         * Orchestrator collaboration state from this point on: log-only,
+         * non-surface, whole-value replace. The last `multitask/mode` wins; a
+         * log with none folds to inactive through the projection unit. The
+         * cropped wire view is `{active, openTasks}`.
+         */
+        'multitask/mode': {
+            /** Whether orchestrator mode is in force. */
+            active: boolean
+            /** Open task ids (`MT-n`) that keep the mode active. */
+            openTasks: string[]
+        }
     }
 }
 
@@ -88,8 +100,8 @@ export declare const inject: string[]
 
 /**
  * Log the scaffold startup line, listen for researcher settlement, register
- * claims, optionally install the round driver, and register the `/multitask`
- * command.
+ * claims, mount orchestrator mode, optionally install the round driver, and
+ * register the `/multitask` command.
  * @param ctx - Host context.
  * @param config - optional driver enable flag and wake bound.
  */
@@ -124,3 +136,19 @@ export {
   pathsOverlap,
   registerClaims
 } from './claims.js'
+export type {
+  OrchestratorModeIntent,
+  OrchestratorModeOutcome,
+  OrchestratorModeProjectionState,
+  OrchestratorModeWireView
+} from './orchestrator-mode.js'
+export {
+  MODE_EVENT_TYPE,
+  ORCHESTRATOR_GUIDANCE,
+  ORCHESTRATOR_SECTION_NAME,
+  PROJECTION_KEY,
+  OrchestratorModeController,
+  foldOpenTasks,
+  orchestratorModeProjectionDefinition,
+  registerOrchestratorMode
+} from './orchestrator-mode.js'
