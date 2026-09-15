@@ -6,6 +6,22 @@ export const STABLE_FEED_URL = 'https://dshdesktop.com/updates/latest/'
 export const VERSION_INDEX_URL = 'https://dshdesktop.com/updates/versions.json'
 
 const INDEX_TIMEOUT_MS = 8_000
+// The version picker refetches on every open; a short-TTL cache keeps rapid
+// opens from hammering versions.json while staying fresh for real picks.
+export const VERSION_INDEX_TTL_MS = 60_000
+
+type CachedVersionIndex = {
+  currentVersion: string
+  releases: AvailableRelease[]
+  fetchedAt: number
+}
+
+let indexCache: CachedVersionIndex | undefined
+
+/** Test hook: forget the cached version index. */
+export function _resetVersionIndexCache(): void {
+  indexCache = undefined
+}
 
 export function archiveFeedUrl(version: string): string {
   return `https://dshdesktop.com/updates/archive/${version}/`
@@ -93,9 +109,44 @@ export function parseVersionIndex(raw: unknown): AvailableRelease[] {
   return versions.filter(isRelease)
 }
 
+/**
+ * List the releases the picker offers for `currentVersion`, newest first.
+ * Served from a short-TTL in-memory cache: a hit never touches the network,
+ * and when a refresh fails while a cached index exists — fresh or stale — the
+ * cache is served instead of throwing so a transient blip cannot empty the
+ * version picker. A cache only ever answers for the same `currentVersion`, and
+ * `options.ttlMs` overrides the TTL for tests.
+ */
 export async function fetchAvailableReleases(
   currentVersion: string,
-  fetchImpl: typeof fetch = globalThis.fetch
+  fetchImpl: typeof fetch = globalThis.fetch,
+  options: { ttlMs?: number } = {}
+): Promise<AvailableRelease[]> {
+  const ttlMs = options.ttlMs ?? VERSION_INDEX_TTL_MS
+  const cached = indexCache
+  if (
+    cached !== undefined &&
+    cached.currentVersion === currentVersion &&
+    Date.now() - cached.fetchedAt < ttlMs
+  ) {
+    return cached.releases
+  }
+  try {
+    const releases = await fetchVersionIndex(currentVersion, fetchImpl)
+    indexCache = { currentVersion, releases, fetchedAt: Date.now() }
+    return releases
+  } catch (error) {
+    if (cached !== undefined && cached.currentVersion === currentVersion) {
+      console.warn('[updates] version index refresh failed; serving cached index', error)
+      return cached.releases
+    }
+    throw error
+  }
+}
+
+async function fetchVersionIndex(
+  currentVersion: string,
+  fetchImpl: typeof fetch
 ): Promise<AvailableRelease[]> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), INDEX_TIMEOUT_MS)

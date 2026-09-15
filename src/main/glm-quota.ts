@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import { app, ipcMain } from 'electron'
 import { parse } from 'yaml'
 
@@ -49,12 +49,24 @@ const KNOWN_QUOTA_HOSTS = ['api.z.ai', 'open.bigmodel.cn']
 let cachedSnapshot: GlmQuotaSnapshot = { status: 'unavailable', checkedAt: 0, reason: 'never polled' }
 let inFlightRefresh: Promise<GlmQuotaSnapshot> | null = null
 
-function readHarnessProvider(): { origin: string; apiKey: string; providers: string[] } | null {
+/**
+ * Resolve the GLM provider from the Harness settings and credential store.
+ * Both files are read through `fs/promises` so the quota refresh — which runs
+ * on the main process — never blocks the event loop on disk I/O; only the
+ * in-memory YAML parse of these small files stays synchronous. A missing or
+ * unreadable settings file yields `null` (no key); the credential store is
+ * best-effort.
+ */
+async function readHarnessProvider(): Promise<{
+  origin: string
+  apiKey: string
+  providers: string[]
+} | null> {
   let provider: ProviderSettings | null = null
   const providers: string[] = []
   try {
     const settings = parse(
-      readFileSync(join(app.getPath('userData'), 'harness', 'settings.yaml'), 'utf8')
+      await readFile(join(app.getPath('userData'), 'harness', 'settings.yaml'), 'utf8')
     ) as {
       providers?: Record<string, ProviderSettings>
       'llm-pi-ai'?: { providers?: Record<string, ProviderSettings> }
@@ -100,7 +112,7 @@ function readHarnessProvider(): { origin: string; apiKey: string; providers: str
   // Read it last so a real environment variable always wins.
   try {
     const credentials = parse(
-      readFileSync(join(app.getPath('userData'), 'harness', '.credentials.yaml'), 'utf8')
+      await readFile(join(app.getPath('userData'), 'harness', '.credentials.yaml'), 'utf8')
     ) as { refs?: Record<string, string> }
     for (const name of candidates) {
       const apiKey = (credentials.refs?.[name] ?? '').trim()
@@ -114,7 +126,7 @@ function readHarnessProvider(): { origin: string; apiKey: string; providers: str
 
 async function refreshSnapshot(): Promise<GlmQuotaSnapshot> {
   const checkedAt = Date.now()
-  const provider = readHarnessProvider()
+  const provider = await readHarnessProvider()
   if (provider === null) {
     return { status: 'no-key', checkedAt }
   }

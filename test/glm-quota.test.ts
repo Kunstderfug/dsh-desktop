@@ -269,6 +269,44 @@ describe('main-process quota poller', () => {
     const snapshot = (await handler()) as Record<string, unknown>
     expect(JSON.stringify(snapshot)).not.toContain('super-secret-key')
   })
+
+  it('treats an unparsable settings file as no-key instead of failing the poll', async () => {
+    setup('providers: [unclosed\n  bad: :::\n', new Error('should not fetch'))
+    const snapshot = (await handler()) as { status: string }
+    expect(snapshot.status).toBe('no-key')
+  })
+
+  it('resolves through async file reads with the exact snapshot shape', async () => {
+    const body = {
+      success: true,
+      code: 200,
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', percentage: 41.6, nextResetTime: '2026-09-12T14:30:00Z' },
+          { type: 'TIME_LIMIT', percentage: 12, nextResetTime: null }
+        ]
+      }
+    }
+    setup(settingsYaml, new Response(JSON.stringify(body), { status: 200 }))
+    process.env.ZAI_API_KEY = 'test-key'
+    const pending = handler()
+    // The provider read is asynchronous: callers get a promise immediately
+    // instead of blocking the main process on disk I/O.
+    expect(typeof (pending as Promise<unknown>).then).toBe('function')
+    expect(await pending).toEqual({
+      status: 'ok',
+      checkedAt: expect.any(Number),
+      providers: ['zai'],
+      tokens: { percentage: 41.6, nextResetTime: '2026-09-12T14:30:00Z' },
+      session: { percentage: 12, nextResetTime: null }
+    })
+  })
+
+  it('reads the harness files off the synchronous main-process path', async () => {
+    const source = await readFile(path.join(projectRoot, 'src', 'main', 'glm-quota.ts'), 'utf8')
+    expect(source).not.toContain('readFileSync')
+    expect(source).toContain('await readFile(')
+  })
 })
 
 describe('the preload bridge', () => {

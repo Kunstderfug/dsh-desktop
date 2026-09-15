@@ -31,6 +31,9 @@ import {
 
 const { autoUpdater } = electronUpdater
 const TRANSIENT_STATUS_MS = 8_000
+// electron-updater emits one download-progress event per chunk; at ~4 forwards
+// per second the progress bar stays live without flooding the IPC bridge.
+const PROGRESS_MIN_INTERVAL_MS = 250
 
 let status = initialUpdateStatus(app.getVersion())
 let prepareToInstall: (() => Promise<void>) | undefined
@@ -48,6 +51,9 @@ let skipLoaded = false
 let manualCheck = false
 let pendingDowngrade = false
 let selectedUpdateVersion: string | undefined
+let lastProgressSentAt = 0
+let pendingProgressPercent: number | undefined
+let progressFlushTimer: NodeJS.Timeout | undefined
 
 export function getUpdateStatus(): UpdateStatus {
   return { ...status }
@@ -244,6 +250,8 @@ export async function installDownloadedUpdate(): Promise<void> {
 }
 
 export function stopUpdateManager(): void {
+  clearPendingProgress()
+  lastProgressSentAt = 0
   if (startupTimer) clearTimeout(startupTimer)
   if (intervalTimer) clearInterval(intervalTimer)
   if (resetTimer) clearTimeout(resetTimer)
@@ -286,20 +294,69 @@ function configureUpdater(): void {
     // the update, which is the same click that starts the download.
     transition({ type: 'available', version: info.version })
   })
-  autoUpdater.on('download-progress', (progress) =>
-    transition({ type: 'progress', percent: progress.percent })
-  )
+  autoUpdater.on('download-progress', (progress) => throttleProgress(progress.percent))
   autoUpdater.on('update-not-available', () => {
     transition({ type: 'not-available' })
     scheduleReset()
   })
-  autoUpdater.on('update-downloaded', (info) =>
+  autoUpdater.on('update-downloaded', (info) => {
+    // Terminal states are never coalesced, and nothing progress-shaped may
+    // trail behind them.
+    clearPendingProgress()
     transition({ type: 'downloaded', version: info.version })
-  )
+  })
   autoUpdater.on('error', (error) => {
+    clearPendingProgress()
     transition({ type: 'error', message: errorMessage(error) })
     if (status.manual) scheduleReset()
   })
+}
+
+/**
+ * Coalesce download-progress bursts before they reach the renderer. The first
+ * event of a burst goes out immediately and the latest percent is always
+ * flushed on a trailing timer, so coalescing only drops redundant mid-chunk
+ * events — never the newest state. 100% passes through at once, and terminal
+ * transitions cancel whatever is still pending.
+ */
+function throttleProgress(percent: number): void {
+  if (Number.isFinite(percent) && percent >= 100) {
+    // The 100% tick is the user-visible completion of the download bar.
+    clearPendingProgress()
+    forwardProgress(100)
+    return
+  }
+  pendingProgressPercent = percent
+  const elapsed = Date.now() - lastProgressSentAt
+  if (elapsed >= PROGRESS_MIN_INTERVAL_MS) {
+    forwardProgress(pendingProgressPercent)
+    return
+  }
+  if (progressFlushTimer === undefined) {
+    progressFlushTimer = setTimeout(
+      () => forwardProgress(pendingProgressPercent),
+      PROGRESS_MIN_INTERVAL_MS - elapsed
+    )
+  }
+}
+
+function forwardProgress(percent: number | undefined): void {
+  if (progressFlushTimer !== undefined) {
+    clearTimeout(progressFlushTimer)
+    progressFlushTimer = undefined
+  }
+  if (percent === undefined) return
+  pendingProgressPercent = undefined
+  lastProgressSentAt = Date.now()
+  transition({ type: 'progress', percent })
+}
+
+function clearPendingProgress(): void {
+  if (progressFlushTimer !== undefined) {
+    clearTimeout(progressFlushTimer)
+    progressFlushTimer = undefined
+  }
+  pendingProgressPercent = undefined
 }
 
 function transition(event: UpdateStateEvent, manualOverride?: boolean): void {
