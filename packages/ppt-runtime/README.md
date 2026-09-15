@@ -24,6 +24,8 @@ Every metadata/design record contains English and Chinese title/body fonts and p
 
 After rebuilding, refresh both dependency integrity entries in `package-lock.json`, then use `npm ci` and the normal postinstall flow. Tests verify the exact archives, language coverage, fonts, activation and state migration. The 23 withdrawn designs and 345 excluded images remain absent; `excluded-assets.json` is a hash-only regression list.
 
+`ppt:build` runs through `scripts/ppt-build.mjs`, which hashes every pipeline input (the four scripts, `scripts/ppt/`, `upstream/`, `core/`, `adapter/`, and `package.json`/`package-lock.json`) plus the generated `templates/` tree into the gitignored marker `.build-cache.json` next to the outputs. A run skips the four steps only when nothing changed since the last fully successful build and both archives still exist; any change — script, source, lockfile, hand-edited template, missing marker or archive, or a failed previous run — triggers the full rebuild. `npm run ppt:build -- --force` always rebuilds.
+
 ## Compatibility
 
 The built-in profile loads one `dsh-ppt-composer` plugin. The Skill, new automatic context records, client registration and primary RPC use DSH names. Historical attribution is kept in notices and an entry-point comment.

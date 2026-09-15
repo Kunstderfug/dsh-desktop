@@ -27,3 +27,6 @@ __pycache__/
 # Native shell (Swift/WKWebView prototype) build output
 /native-shell/build/
 /native-shell/.build/
+
+# ppt:build incremental cache marker (scripts/ppt-build.mjs)
+/packages/ppt-runtime/.build-cache.json
