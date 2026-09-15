@@ -681,3 +681,34 @@ describe('Harness window activation', () => {
     )
   })
 })
+
+describe('pnpm side-effects cache pin', () => {
+  // The cache stays off by deliberate decision (see pnpmSideEffectsCacheAllowed
+  // in harness-runtime.ts): only the exact diagnostic token opts in, a stray
+  // npm_config value from the captured shell cannot re-enable it, and
+  // near-miss tokens are not close enough. Both env spellings are asserted in
+  // every row because either casing could be the one a child pnpm consults.
+  it.each([
+    ['an empty parent environment', {}, 'false'],
+    ['a stray parent shell config', { npm_config_side_effects_cache: 'true' }, 'false'],
+    ['a near-miss diagnostic token', { DSH_PNPM_SIDE_EFFECTS_CACHE: 'true' }, 'false'],
+    ['an explicit zero diagnostic token', { DSH_PNPM_SIDE_EFFECTS_CACHE: '0' }, 'false'],
+    ['the exact diagnostic token', { DSH_PNPM_SIDE_EFFECTS_CACHE: '1' }, 'true']
+  ])('resolves the pin for %s', (_name, environment, expected) => {
+    const spawnOptions = buildHarnessSpawnOptions('/launch', '/home', 'darwin', environment)
+    expect(spawnOptions.env?.npm_config_side_effects_cache).toBe(expected)
+    expect(spawnOptions.env?.PNPM_CONFIG_SIDE_EFFECTS_CACHE).toBe(expected)
+  })
+
+  it('keeps the rest of the env wiring intact next to the pin', () => {
+    // The pin rides on the same env object as everything else; assert it did
+    // not crowd out the neighboring wiring the other expectations here pin.
+    const spawnOptions = buildHarnessSpawnOptions('/launch', '/home', 'darwin', {
+      PATH: '/usr/bin',
+      npm_config_side_effects_cache: 'true'
+    })
+    expect(spawnOptions.env?.PATH).toBe('/usr/bin')
+    expect(spawnOptions.env?.DSH_HOME).toBe('/home')
+    expect(spawnOptions.env?.NO_COLOR).toBe('1')
+  })
+})

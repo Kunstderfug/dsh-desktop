@@ -194,4 +194,26 @@ describe('buildProfilePluginCommandEnvironment', () => {
       expect(result.PATH).not.toContain(userPath)
     }
   })
+
+  // The cache stays off by deliberate decision (see pnpmSideEffectsCacheAllowed
+  // in harness-runtime.ts, shared with the Harness spawn env): only the exact
+  // diagnostic token opts in, a stray npm_config value from the parent shell
+  // cannot re-enable it, and near-miss tokens are not close enough. Both env
+  // spellings are asserted because either casing could be the one a child
+  // pnpm consults.
+  it.each([
+    ['an empty parent environment', {}, 'false'],
+    ['a stray parent shell config', { npm_config_side_effects_cache: 'true' }, 'false'],
+    ['a near-miss diagnostic token', { DSH_PNPM_SIDE_EFFECTS_CACHE: 'true' }, 'false'],
+    ['an explicit zero diagnostic token', { DSH_PNPM_SIDE_EFFECTS_CACHE: '0' }, 'false'],
+    ['the exact diagnostic token', { DSH_PNPM_SIDE_EFFECTS_CACHE: '1' }, 'true']
+  ])('resolves the side-effects cache pin for %s', (_name, environment, expected) => {
+    const result = buildProfilePluginCommandEnvironment(
+      environment,
+      'C:\\shim',
+      'C:\\bundled\\node.exe'
+    )
+    expect(result.npm_config_side_effects_cache).toBe(expected)
+    expect(result.PNPM_CONFIG_SIDE_EFFECTS_CACHE).toBe(expected)
+  })
 })

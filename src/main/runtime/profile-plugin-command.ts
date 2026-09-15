@@ -2,7 +2,10 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { delimiter, dirname, join } from 'node:path'
-import { resolveEnvironmentPath } from './harness-runtime'
+import {
+  pnpmSideEffectsCacheAllowed,
+  resolveEnvironmentPath
+} from './harness-runtime'
 
 const PROFILE = 'web'
 const OPERATION_TIMEOUT_MS = 15 * 60 * 1000
@@ -206,8 +209,17 @@ export function buildProfilePluginCommandEnvironment(
   result.DSH_HOME = result.DSH_HOME ?? ''
   result.CI = 'true'
   result.NO_COLOR = '1'
-  result.npm_config_side_effects_cache = 'false'
-  result.PNPM_CONFIG_SIDE_EFFECTS_CACHE = 'false'
+  // The side-effects cache stays pinned off for plugin commands for the same
+  // reasons as the Harness spawn env — see pnpmSideEffectsCacheAllowed in
+  // harness-runtime.ts (the ABI-blind ENGINE_NAME cache key vs pnpm running
+  // under ELECTRON_RUN_AS_NODE, mid-install stall kills on Windows, and the
+  // market-installer's own promotion-rename pin). The DSH_PNPM_SIDE_EFFECTS_
+  // CACHE=1 diagnostic hatch applies here too; a stray npm_config value from
+  // the parent shell does not re-enable anything. Both spellings are set so
+  // the pin holds regardless of which casing the child pnpm consults.
+  const sideEffectsCachePin = pnpmSideEffectsCacheAllowed(environment) ? 'true' : 'false'
+  result.npm_config_side_effects_cache = sideEffectsCachePin
+  result.PNPM_CONFIG_SIDE_EFFECTS_CACHE = sideEffectsCachePin
   return result
 }
 

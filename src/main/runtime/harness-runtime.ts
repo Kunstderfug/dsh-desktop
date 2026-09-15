@@ -280,6 +280,40 @@ export function resolveEnvironmentPath(
   return ''
 }
 
+/**
+ * Whether pnpm's side-effects cache may run for installs this app spawns.
+ * The default is OFF — deliberately, not by inheritance: pnpm 10 actually
+ * defaults the setting to true, so this is an explicit opt-out.
+ *
+ * - A cache entry is keyed on `${platform};${arch};node<MAJOR>` (calcDepState /
+ *   ENGINE_NAME in pnpm 10). The key cannot tell Electron's Node ABI from a
+ *   same-major system Node, yet pnpm here runs under ELECTRON_RUN_AS_NODE and
+ *   the profile ships native modules (node-pty): a restore across that line
+ *   deploys a native build for the wrong ABI — the failure family behind the
+ *   node-pty conpty faults the Windows repair-loop work fought (#183).
+ * - Installs on this path are killed mid-run on purpose when a Windows copy
+ *   looks stalled (#183's stall detector), so interrupted builds are a normal
+ *   event here, not an anomaly a build cache can assume away.
+ * - Every later pass that revisited pnpm tuning chose to keep the pin: #204
+ *   reverted the sibling clone-or-copy/child-concurrency pins and kept this
+ *   one; #220 seeds `side-effects-cache=false` as the profile .npmrc default;
+ *   the generations installer writes it into the staging .npmrc as one of
+ *   "the settings the promotion rename depends on" (#352).
+ *
+ * `DSH_PNPM_SIDE_EFFECTS_CACHE=1` (exact token, in the style of
+ * DSH_TUNNEL_FORCE_PINGGY) opts a diagnostic run back in; any other value,
+ * including a stray `npm_config_side_effects_cache` from the captured shell,
+ * keeps the pin. Generation installs never see this hatch — the
+ * market-installer service builds its own environment and pins the cache off
+ * itself (packages/dsh-desktop-market-installer/index.js and
+ * generations/installer.mjs). On Windows, export the variable with this exact
+ * casing: Windows preserves rather than normalizes env-var case, and this
+ * read (like every env read here) is exact-case.
+ */
+export function pnpmSideEffectsCacheAllowed(environment: NodeJS.ProcessEnv): boolean {
+  return environment.DSH_PNPM_SIDE_EFFECTS_CACHE === '1'
+}
+
 export function buildHarnessSpawnOptions(
   launchDirectory: string,
   dshHome: string,
@@ -314,8 +348,19 @@ export function buildHarnessSpawnOptions(
       // into multi-minute (up to 30-minute) waits on Windows. The Windows
       // locked-rename problem this was meant to route around is handled by
       // the dedicated lock-recovery runner instead (see pnpm-runner.mjs).
-      npm_config_side_effects_cache: 'false',
-      PNPM_CONFIG_SIDE_EFFECTS_CACHE: 'false',
+      // The side-effects cache stays pinned OFF (rationale and the
+      // DSH_PNPM_SIDE_EFFECTS_CACHE=1 diagnostic hatch: see
+      // pnpmSideEffectsCacheAllowed above). Both spellings are set so the pin
+      // holds regardless of which casing a child tool consults, and they
+      // overwrite whatever the captured shell carried — a stray
+      // `npm_config_side_effects_cache` from the user's shell must not
+      // silently re-enable the cache.
+      npm_config_side_effects_cache: pnpmSideEffectsCacheAllowed(environment)
+        ? 'true'
+        : 'false',
+      PNPM_CONFIG_SIDE_EFFECTS_CACHE: pnpmSideEffectsCacheAllowed(environment)
+        ? 'true'
+        : 'false',
       [pathKey]: resolveEnvironmentPath(environment, platform)
     },
     stdio: ['pipe', 'pipe', 'pipe'],
