@@ -324,12 +324,15 @@
       "output": "dist",
       "buildResources": "build"
     },
+    "afterPack": "scripts/after-pack.cjs",
     "files": [
       "out/**/*",
       "node_modules/**/*",
       "package.json",
       "!**/*.map",
-      "!**/node_modules/@mistralai/mistralai/src/**"
+      "!**/node_modules/@mistralai/mistralai/src/**",
+      "!**/node_modules/@deepseek-ai/dsh-typert-generator/**",
+      "!**/node_modules/typescript/**"
     ],
     "extraResources": [
       {

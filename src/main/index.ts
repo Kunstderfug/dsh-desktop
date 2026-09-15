@@ -575,6 +575,14 @@ function dshEntryPath(): string {
 }
 
 function bundledNodePath(): string {
+  // macOS never spawns the bundled Node binary: the Harness itself runs in the
+  // Electron utility process (harness-node-entry.mjs re-declares Node mode for
+  // children), and every other Node child (pnpm shims, plugin commands) runs
+  // this Electron binary under ELECTRON_RUN_AS_NODE=1 — see
+  // profile-plugin-command.ts, which pairs this path with that variable. The
+  // bundled binary ships only for Windows and Linux, where no Electron process
+  // is available to borrow.
+  if (process.platform === 'darwin') return process.execPath
   const executable = process.platform === 'win32' ? 'node.exe' : 'node'
   return join(app.getAppPath(), 'node_modules', 'node', 'bin', executable)
 }

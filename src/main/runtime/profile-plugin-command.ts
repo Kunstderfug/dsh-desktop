@@ -56,6 +56,28 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`
 }
 
+/**
+ * On macOS the "bundled Node executable" is the Electron binary running in
+ * Node mode (see bundledNodePath in src/main/index.ts): it only behaves as
+ * Node when ELECTRON_RUN_AS_NODE=1 is set, otherwise it boots the whole app.
+ * Windows and Linux spawn a real Node binary and must not set the variable —
+ * the packaged harness-node-entry.mjs relies on its absence to distinguish
+ * bundled-Node hosts.
+ */
+function needsElectronRunAsNode(): boolean {
+  return process.platform === 'darwin'
+}
+
+/**
+ * The environment a Node child needs beyond the caller's own. Shims written to
+ * `.desktop-bin` outlive this process and are invoked by Harness and plugins
+ * later, so they carry the same declaration inside the script itself instead
+ * of relying on an inherited environment.
+ */
+function electronAsNodeShimPreamble(): string {
+  return needsElectronRunAsNode() ? 'export ELECTRON_RUN_AS_NODE=1\n' : ''
+}
+
 export function buildProfilePluginRemoveArguments(
   dshEntryPath: string,
   pluginName: string,
@@ -123,10 +145,11 @@ export async function ensureProfilePnpmShim(options: ProfilePluginCommandOptions
       'utf8'
     )
   } else {
+    const preamble = electronAsNodeShimPreamble()
     const pnpmPath = join(directory, 'pnpm')
     await writeFile(
       pnpmPath,
-      `#!/bin/sh\nexec ${shellQuote(options.nodeExecutablePath)} ${command
+      `#!/bin/sh\n${preamble}exec ${shellQuote(options.nodeExecutablePath)} ${command
         .map(shellQuote)
         .join(' ')} "$@"\n`,
       { encoding: 'utf8', mode: 0o755 }
@@ -135,7 +158,7 @@ export async function ensureProfilePnpmShim(options: ProfilePluginCommandOptions
     const nodePath = join(directory, 'node')
     await writeFile(
       nodePath,
-      `#!/bin/sh\nexec ${shellQuote(options.nodeExecutablePath)} "$@"\n`,
+      `#!/bin/sh\n${preamble}exec ${shellQuote(options.nodeExecutablePath)} "$@"\n`,
       { encoding: 'utf8', mode: 0o755 }
     )
     await chmod(nodePath, 0o755)
@@ -165,6 +188,9 @@ export function buildProfilePluginCommandEnvironment(
 ): NodeJS.ProcessEnv {
   const result = { ...environment }
   delete result.ELECTRON_RUN_AS_NODE
+  // The direct spawn below runs the Electron binary in Node mode on macOS;
+  // restore the declaration the delete above stripped from the parent block.
+  if (needsElectronRunAsNode()) result.ELECTRON_RUN_AS_NODE = '1'
 
   // The spread above keeps only the casing the OS block actually stores —
   // even for `process.env`, whose case-insensitivity does not survive a
