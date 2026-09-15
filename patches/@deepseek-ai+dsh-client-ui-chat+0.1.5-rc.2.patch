@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
-index 306645f..cd45cea 100644
+index 306645f..67aea85 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
 @@ -1124,7 +1124,10 @@ window.__ModuleLoader__.load({
@@ -59,7 +59,7 @@ index 306645f..cd45cea 100644
  		const tagId$1 = "@deepseek-ai/dsh-client-ui-chat/StatsPills.module.css";
  		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$1) + "]") === null) {
  			const tag = document.createElement("style");
-@@ -3941,10 +3952,197 @@ window.__ModuleLoader__.load({
+@@ -3941,10 +3952,208 @@ window.__ModuleLoader__.load({
  		function billedInputTokens(usage) {
  			return usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
  		}
@@ -139,10 +139,12 @@ index 306645f..cd45cea 100644
 +		/**
 +		 * GLM Coding Plan quota, polled by the desktop main process and read here
 +		 * through the `window.dshGlmQuota` bridge. Null while the bridge is absent
-+		 * (tests, other shells) or the active provider is not a GLM plan.
++		 * (tests, other shells), the active provider is not a GLM plan, or the
++		 * session's selected route is not one of the plan's provisioning routes.
 +		 */
-+		function useGlmQuota() {
++		function useGlmQuota(useProjection) {
 +			const [quota, setQuota] = (0, react.useState)(null);
++			const selection = useProjection("modelSelection");
 +			(0, react.useEffect)(() => {
 +				if (typeof window === "undefined" || typeof window.dshGlmQuota?.get !== "function") return;
 +				let disposed = false;
@@ -156,7 +158,7 @@ index 306645f..cd45cea 100644
 +					clearInterval(timer);
 +				};
 +			}, []);
-+			return quota;
++			return glmQuotaApplies(quota, selection?.next ?? null) ? quota : null;
 +		}
 +		function quotaCountdown(iso, now) {
 +			const reset = new Date(iso).getTime();
@@ -177,6 +179,17 @@ index 306645f..cd45cea 100644
 +			const parts = [`GLM ${quotaBar(tokens.percentage)} ${Math.round(tokens.percentage)}%`];
 +			if (countdown !== null) parts.push(countdown);
 +			return parts.join(" \u00b7 ");
++		}
++		/** Provisioning route ids the desktop reported as GLM plan routes; empty unless the snapshot is ok. */
++		function glmQuotaProviders(snapshot) {
++			if (snapshot === null || typeof snapshot !== "object" || snapshot.status !== "ok") return [];
++			return Array.isArray(snapshot.providers) ? snapshot.providers : [];
++		}
++		/** Whether this session's selected route is one the plan actually serves. */
++		function glmQuotaApplies(snapshot, selection) {
++			if (selection === null || typeof selection !== "object") return false;
++			const providers = glmQuotaProviders(snapshot);
++			return providers.length > 0 && providers.includes(selection.provider);
 +		}
 +		function quotaMeter(pct) {
 +			pct = Math.min(100, Math.max(0, pct));
@@ -204,8 +217,7 @@ index 306645f..cd45cea 100644
 +				})
 +			});
 +		}
-+		function GlmQuotaPill() {
-+			const quota = useGlmQuota();
++		function GlmQuotaPill({ quota }) {
 +			const [now, setNow] = (0, react.useState)(() => Date.now());
 +			(0, react.useEffect)(() => {
 +				const timer = setInterval(() => setNow(Date.now()), 3e4);
@@ -236,8 +248,7 @@ index 306645f..cd45cea 100644
 +				})
 +			});
 +		}
-+		function GlmQuotaRow({ t }) {
-+			const quota = useGlmQuota();
++		function GlmQuotaRow({ t, quota }) {
 +			const [now, setNow] = (0, react.useState)(() => Date.now());
 +			(0, react.useEffect)(() => {
 +				const timer = setInterval(() => setNow(Date.now()), 3e4);
@@ -254,47 +265,49 @@ index 306645f..cd45cea 100644
  			return t("message.turnUsage.count", { count: formatExactTokens(value, t) });
  		}
 -		function TimePill({ stats, t, dialog }) {
-+		function TimePill({ stats, t, price, dialog }) {
++		function TimePill({ stats, t, price, dialog, quota }) {
  			const { open, setOpen, rootRef, panelRef, pos } = useStatDialog(dialog);
  			const counts = t("stats.counts", {
  				turns: stats.turns,
-@@ -4004,7 +4202,8 @@ window.__ModuleLoader__.load({
+@@ -4004,7 +4213,8 @@ window.__ModuleLoader__.load({
  								stats.llmMs > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.llmTime") }), (0, react_jsx_runtime.jsx)("dd", { children: formatDuration(stats.llmMs, t) })] }),
  								stats.toolMs > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.toolTime") }), (0, react_jsx_runtime.jsx)("dd", { children: formatDuration(stats.toolMs, t) })] }),
  								stats.ttftSteps > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.ttft") }), (0, react_jsx_runtime.jsx)("dd", { children: formatDuration(stats.ttftMs / stats.ttftSteps, t) })] }),
 -								stats.decodeMs > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.speed") }), (0, react_jsx_runtime.jsx)("dd", { children: t("message.tokensPerSecond", { tps: formatTokensPerSecond(stats.decodeTokens / (stats.decodeMs / 1e3)) }) })] })
 +								stats.decodeMs > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.speed") }), (0, react_jsx_runtime.jsx)("dd", { children: t("message.tokensPerSecond", { tps: formatTokensPerSecond(stats.decodeTokens / (stats.decodeMs / 1e3)) }) })] }),
-+								price !== null && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.price") }), (0, react_jsx_runtime.jsx)("dd", { children: formatSessionPrice(price) })] }), (0, react_jsx_runtime.jsx)(GlmQuotaRow, { t })
++								price !== null && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.price") }), (0, react_jsx_runtime.jsx)("dd", { children: formatSessionPrice(price) })] }), (0, react_jsx_runtime.jsx)(GlmQuotaRow, { t, quota })
  							]
  						})
  					]
-@@ -4079,6 +4278,8 @@ window.__ModuleLoader__.load({
+@@ -4079,6 +4289,9 @@ window.__ModuleLoader__.load({
  		const StatsPills = (0, react.memo)(function StatsPills({ useChat, useProjection, t }) {
  			const settledNodes = useChat((s) => s.legacy.nodes);
  			const usage = useProjection("tokenUsage");
 +			const routeUsage = useProjection("routeUsage");
 +			const price = (0, react.useMemo)(() => sessionPrice(routeUsage), [routeUsage]);
++			const quota = useGlmQuota(useProjection);
  			const [openPill, setOpenPill] = (0, react.useState)(null);
  			const projected = useProjection("sessionStats");
  			const stats = (0, react.useMemo)(() => projected ?? deriveStats(settledNodes), [projected, settledNodes]);
-@@ -4090,6 +4291,7 @@ window.__ModuleLoader__.load({
+@@ -4090,6 +4303,8 @@ window.__ModuleLoader__.load({
  				children: [stats.steps > 0 && (0, react_jsx_runtime.jsx)(TimePill, {
  					stats,
  					t,
 +					price,
++					quota,
  					dialog: {
  						open: openPill === "time",
  						setOpen: (open) => {
-@@ -4105,7 +4307,7 @@ window.__ModuleLoader__.load({
+@@ -4105,7 +4320,7 @@ window.__ModuleLoader__.load({
  							setOpenPill(open ? "usage" : null);
  						}
  					}
 -				})]
-+				}), (0, react_jsx_runtime.jsx)(GlmQuotaPill, {})]
++				}), (0, react_jsx_runtime.jsx)(GlmQuotaPill, { quota })]
  			});
  		});
  		//#endregion
-@@ -8362,6 +8564,9 @@ window.__ModuleLoader__.load({
+@@ -8362,6 +8577,9 @@ window.__ModuleLoader__.load({
  		exports.inject = inject;
  		exports.isRunningTool = isRunningTool;
  		exports.isSettledTool = isSettledTool;

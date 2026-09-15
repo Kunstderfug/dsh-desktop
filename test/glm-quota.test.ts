@@ -32,6 +32,8 @@ describe('chat bundle quota helpers', () => {
   let quotaCountdown: (iso: string, now: number) => string | null
   let quotaBar: (percentage: number) => string
   let quotaText: (snapshot: unknown, now: number) => string | null
+  let glmQuotaProviders: (snapshot: unknown) => string[]
+  let glmQuotaApplies: (snapshot: unknown, selection: unknown) => boolean
 
   beforeAll(async () => {
     const source = await readFile(chatBundle, 'utf8')
@@ -41,9 +43,9 @@ describe('chat bundle quota helpers', () => {
       return source.slice(start, source.indexOf('\n\t\t}\n', start) + 4)
     }
     const factory = new Function(
-      `${take('quotaCountdown')}\n${take('quotaBar')}\n${take('quotaText')}\nreturn { quotaCountdown, quotaBar, quotaText }`
+      `${take('quotaCountdown')}\n${take('quotaBar')}\n${take('quotaText')}\n${take('glmQuotaProviders')}\n${take('glmQuotaApplies')}\nreturn { quotaCountdown, quotaBar, quotaText, glmQuotaProviders, glmQuotaApplies }`
     )
-    ;({ quotaCountdown, quotaBar, quotaText } = factory())
+    ;({ quotaCountdown, quotaBar, quotaText, glmQuotaProviders, glmQuotaApplies } = factory())
   })
 
   it('renders an eight-cell bar clamped to 0-100%', () => {
@@ -83,6 +85,32 @@ describe('chat bundle quota helpers', () => {
     const snapshot = { status: 'ok', tokens: { percentage: 0, nextResetTime: null } }
     expect(quotaText(snapshot, now)).toBe('GLM ░░░░░░░░ 0%')
   })
+
+  it('reads the GLM route ids only from an ok snapshot', () => {
+    expect(glmQuotaProviders({ status: 'ok', providers: ['zai'] })).toEqual(['zai'])
+    expect(glmQuotaProviders({ status: 'ok', providers: [] })).toEqual([])
+    expect(glmQuotaProviders({ status: 'ok' })).toEqual([])
+    expect(glmQuotaProviders({ status: 'no-key', providers: ['zai'] })).toEqual([])
+    expect(glmQuotaProviders({ status: 'unavailable', providers: ['zai'] })).toEqual([])
+    expect(glmQuotaProviders(null)).toEqual([])
+    expect(glmQuotaProviders(undefined)).toEqual([])
+  })
+
+  it('shows the surfaces only for a session running a GLM route', () => {
+    const ok = { status: 'ok', providers: ['zai', 'zai-coding-cn'] }
+    expect(glmQuotaApplies(ok, { provider: 'zai' })).toBe(true)
+    expect(glmQuotaApplies(ok, { provider: 'zai-coding-cn' })).toBe(true)
+    expect(glmQuotaApplies(ok, { provider: 'deepseek-official' })).toBe(false)
+    // no selection yet, or a selection without a provider, stays hidden
+    expect(glmQuotaApplies(ok, null)).toBe(false)
+    expect(glmQuotaApplies(ok, undefined)).toBe(false)
+    expect(glmQuotaApplies(ok, {})).toBe(false)
+    // a non-ok or provider-less snapshot hides even a GLM session
+    expect(glmQuotaApplies({ status: 'error' }, { provider: 'zai' })).toBe(false)
+    expect(glmQuotaApplies({ status: 'ok', providers: [] }, { provider: 'zai' })).toBe(false)
+    expect(glmQuotaApplies({ status: 'ok' }, { provider: 'zai' })).toBe(false)
+    expect(glmQuotaApplies(null, { provider: 'zai' })).toBe(false)
+  })
 })
 
 describe('the shipped chat bundle', () => {
@@ -91,8 +119,8 @@ describe('the shipped chat bundle', () => {
     expect(source).toContain('function GlmQuotaPill(')
     expect(source).toContain('function GlmQuotaRow(')
     expect(source).toContain('function useGlmQuota(')
-    expect(source).toContain('(0, react_jsx_runtime.jsx)(GlmQuotaPill, {})')
-    expect(source).toContain('(0, react_jsx_runtime.jsx)(GlmQuotaRow, { t })')
+    expect(source).toContain('(0, react_jsx_runtime.jsx)(GlmQuotaPill, { quota })')
+    expect(source).toContain('(0, react_jsx_runtime.jsx)(GlmQuotaRow, { t, quota })')
     expect(source).toContain('"stats.dialog.glmQuota": "GLM plan"')
     expect(source).toContain('"stats.dialog.glmQuota": "GLM 套餐"')
     // the pill must read the desktop bridge, never a raw endpoint
@@ -206,6 +234,28 @@ describe('main-process quota poller', () => {
     process.env.ZAI_API_KEY = 'env-key-wins'
     const snapshot = await handler() as { status: string }
     expect(snapshot.status).toBe('ok')
+  })
+
+  it('publishes the provisioning route id of every GLM provider', async () => {
+    setup(
+      settingsYaml,
+      new Response('{"success":true,"code":200,"data":{"limits":[{"type":"TOKENS_LIMIT","percentage":3}]}}', { status: 200 })
+    )
+    process.env.ZAI_API_KEY = 'test-key'
+    const snapshot = (await handler()) as { status: string; providers: string[] }
+    expect(snapshot.status).toBe('ok')
+    expect(snapshot.providers).toEqual(['zai'])
+  })
+
+  it('publishes every GLM route id and skips non-GLM providers', async () => {
+    setup(
+      'llm-pi-ai:\n  providers:\n    zai:\n      baseURL: https://api.z.ai/api/coding/paas/v4\n      apiKeyEnv: ZAI_API_KEY\n    zai-coding-cn:\n      baseURL: https://open.bigmodel.cn/api/coding/paas/v4\n      apiKeyEnv: ZAI_API_KEY\n    deepseek-official:\n      baseURL: https://api.deepseek.com\n      apiKeyEnv: DEEPSEEK_API_KEY\n',
+      new Response('{"success":true,"code":200,"data":{"limits":[{"type":"TOKENS_LIMIT","percentage":3}]}}', { status: 200 })
+    )
+    process.env.ZAI_API_KEY = 'test-key'
+    const snapshot = (await handler()) as { status: string; providers: string[] }
+    expect(snapshot.status).toBe('ok')
+    expect(snapshot.providers).toEqual(['zai', 'zai-coding-cn'])
   })
 
   it('never sends the API key to the renderer', async () => {

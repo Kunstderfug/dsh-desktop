@@ -15,7 +15,9 @@ import { parse } from 'yaml'
  * The desktop reads the provider's `apiKeyEnv` indirection from the Harness
  * `settings.yaml` instead of duplicating provider configuration: whichever
  * provider entry points at api.z.ai or open.bigmodel.cn donates its host and
- * its key environment variable. The key itself never crosses the IPC boundary.
+ * its key environment variable. The key itself never crosses the IPC boundary;
+ * the snapshot names the provisioning route ids that use those hosts so the
+ * renderer can scope the quota surfaces to sessions running a GLM route.
  */
 
 export type GlmQuotaLimit = {
@@ -24,7 +26,13 @@ export type GlmQuotaLimit = {
 }
 
 export type GlmQuotaSnapshot =
-  | { status: 'ok'; checkedAt: number; tokens: GlmQuotaLimit; session: GlmQuotaLimit | null }
+  | {
+      status: 'ok'
+      checkedAt: number
+      providers: string[]
+      tokens: GlmQuotaLimit
+      session: GlmQuotaLimit | null
+    }
   | { status: 'no-key'; checkedAt: number }
   | { status: 'unavailable'; checkedAt: number; reason: string }
   | { status: 'error'; checkedAt: number; reason: string }
@@ -41,8 +49,9 @@ const KNOWN_QUOTA_HOSTS = ['api.z.ai', 'open.bigmodel.cn']
 let cachedSnapshot: GlmQuotaSnapshot = { status: 'unavailable', checkedAt: 0, reason: 'never polled' }
 let inFlightRefresh: Promise<GlmQuotaSnapshot> | null = null
 
-function readHarnessProvider(): { origin: string; apiKey: string } | null {
+function readHarnessProvider(): { origin: string; apiKey: string; providers: string[] } | null {
   let provider: ProviderSettings | null = null
+  const providers: string[] = []
   try {
     const settings = parse(
       readFileSync(join(app.getPath('userData'), 'harness', 'settings.yaml'), 'utf8')
@@ -54,14 +63,16 @@ function readHarnessProvider(): { origin: string; apiKey: string } | null {
     // older installs kept it at the top level.
     const tables = [settings['llm-pi-ai']?.providers, settings.providers]
     for (const table of tables) {
-      for (const candidate of Object.values(table ?? {})) {
+      for (const [route, candidate] of Object.entries(table ?? {})) {
         const base = candidate?.baseURL ?? ''
         if (KNOWN_QUOTA_HOSTS.some((host) => base.includes(host))) {
-          provider = candidate
-          break
+          // The first entry keeps today's precedence for origin and key; every
+          // matching route is still published so the renderer can recognise any
+          // of them as a GLM session.
+          provider ??= candidate
+          if (!providers.includes(route)) providers.push(route)
         }
       }
-      if (provider !== null) break
     }
   } catch {
     return null
@@ -82,7 +93,7 @@ function readHarnessProvider(): { origin: string; apiKey: string } | null {
   )
   for (const name of candidates) {
     const apiKey = (process.env[name] ?? '').trim()
-    if (apiKey !== '') return { origin, apiKey }
+    if (apiKey !== '') return { origin, apiKey, providers }
   }
   // The app's own Settings UI stores entered keys in the Harness credential
   // store (harness/.credentials.yaml) keyed by the env-var name they back.
@@ -93,7 +104,7 @@ function readHarnessProvider(): { origin: string; apiKey: string } | null {
     ) as { refs?: Record<string, string> }
     for (const name of candidates) {
       const apiKey = (credentials.refs?.[name] ?? '').trim()
-      if (apiKey !== '') return { origin, apiKey }
+      if (apiKey !== '') return { origin, apiKey, providers }
     }
   } catch {
     // no credential store — fall through
@@ -139,7 +150,7 @@ async function refreshSnapshot(): Promise<GlmQuotaSnapshot> {
     if (tokens === null) {
       return { status: 'unavailable', checkedAt, reason: 'no TOKENS_LIMIT in response' }
     }
-    return { status: 'ok', checkedAt, tokens, session }
+    return { status: 'ok', checkedAt, providers: provider.providers, tokens, session }
   } catch (error) {
     return { status: 'error', checkedAt, reason: error instanceof Error ? error.message : String(error) }
   }
