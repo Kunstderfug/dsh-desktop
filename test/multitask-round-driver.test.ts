@@ -503,6 +503,45 @@ describe('multitask_round_driver_gate settlement wake bound', () => {
     expect(admittedHandoffs(agent).length).toBe(extraBeforeReset + 1)
   })
 
+  it('does not wake for a settlement once the task phase is terminal', { timeout: 20_000 }, async () => {
+    const f = await fixture({
+      maxConsecutiveWakes: 2,
+      respond: async (call) => {
+        if (isResearcherCall(call)) return STRUCTURED_REPORT
+        return `parent ack ${userText(call.request).slice(0, 80)}`
+      }
+    })
+    const agent = await f.agent('session-1')
+
+    await runCommand(f, agent, '/multitask finish then stay finished')
+    await waitFor(() => researchEvents(agent).some(event => event.phase === 'researched'), 'first researcher settled')
+    await waitFor(() => admittedHandoffs(agent).length >= 1, 'command handoff admitted')
+    await agent.whenIdle()
+
+    agent.session.append('multitask/phase', {
+      id: 'MT-1',
+      objective: 'finish then stay finished',
+      phase: 'done',
+      createdAt: new Date().toISOString()
+    })
+
+    const beforeTerminal = admittedHandoffs(agent).length
+    await f.ctx.subagents.startContinuable({
+      provider: 'spawn',
+      label: 'settle-after-done',
+      request: {
+        prompt: [{ type: 'text', text: 'do not modify files\nRecommended claim set\nstructured research report after done' }],
+        parent: agent,
+        persona: RESEARCHER_LABEL,
+        toolFilter: { deny: ['write', 'edit', 'str_replace_editor'] }
+      },
+      signal: new AbortController().signal
+    })
+    await agent.whenIdle()
+    expect(admittedHandoffs(agent).length, 'a terminal task must not consume a wake').toBe(beforeTerminal)
+    expect(queuedHandoffs(agent), 'a terminal task must not queue a handoff').toHaveLength(0)
+  })
+
   it('disarms pending rounds on max-tokens, abort, and plugin teardown', { timeout: 20_000 }, async () => {
     const parentHold = gate()
     const f = await fixture({

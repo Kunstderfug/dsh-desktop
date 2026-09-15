@@ -88,6 +88,8 @@ declare module '@deepseek-ai/dsh-session/types' {
             note?: string
             /** Failure owner: `researcher` or `writer`. */
             reason?: string
+            /** Stable lineage label when a child produced this phase. */
+            label?: string
         }
         /**
          * One claim-enforcement denial. Log-only; folded into the task card as a
@@ -167,6 +169,7 @@ export type {
 export {
   DEFAULT_MAX_CONSECUTIVE_WAKES,
   isMultitaskHandoffSource,
+  isTerminalTask,
   latestTask,
   registerRoundDriver,
   renderHandoffPrompt,
@@ -225,6 +228,7 @@ export {
   PROJECTION_KEY,
   OrchestratorModeController,
   foldOpenTasks,
+  foldTerminalTasks,
   orchestratorModeProjectionDefinition,
   registerOrchestratorMode
 } from './orchestrator-mode.js'

@@ -99,6 +99,27 @@ export function foldOpenTasks(session) {
   return open
 }
 
+/**
+ * Fold task ids whose host-published `multitask/phase` is terminal.
+ *
+ * `done` (writer handoff completed) and `failed` both close a task; a task
+ * with any later non-terminal phase event after a terminal one stays closed —
+ * the host never re-opens a published terminal phase.
+ *
+ * @param session - session whose log is folded.
+ * @returns set of terminal task ids.
+ */
+export function foldTerminalTasks(session) {
+  const terminal = new Set()
+  for (const event of session.snapshotEvents()) {
+    if (event.type !== 'multitask/phase') continue
+    const taskId = String(event.data?.id ?? '')
+    if (taskId.length === 0) continue
+    if (event.data?.phase === 'done' || event.data?.phase === 'failed') terminal.add(taskId)
+  }
+  return terminal
+}
+
 function viewOf(state) {
   if (!state.active && state.openTasks.length === 0) return INACTIVE_VIEW
   return {
@@ -315,12 +336,22 @@ export class OrchestratorModeController extends Service {
     return this.set(agent, { active: openTasks.length > 0, openTasks })
   }
 
-  /** Re-propose intents that the log recorded as tasks but never committed. */
+  /**
+   * Re-propose intents the log recorded as tasks but never committed, and
+   * close tasks whose folded phase is terminal, so a resumed process neither
+   * re-opens finished work nor keeps it active.
+   */
   syncFromLog(agent) {
     const desired = foldOpenTasks(agent.session)
     const logged = this.loggedOpenTasks(agent.session)
     for (const id of desired) {
       if (!logged.includes(id)) this.noteTaskOpened(agent, id)
+    }
+    const terminal = foldTerminalTasks(agent.session)
+    if (terminal.size === 0) return
+    const open = new Set([...this.currentIntent(agent.session).openTasks, ...logged])
+    for (const id of open) {
+      if (terminal.has(id)) this.noteTaskClosed(agent, id)
     }
   }
 }

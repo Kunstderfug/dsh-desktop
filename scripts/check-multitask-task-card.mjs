@@ -53,7 +53,6 @@ const PLAIN_QUEUE = `plain queued user message ${EPOCH}`
 const projectRoot = join(import.meta.dirname, '..')
 const FORBIDDEN_PATHS = [
   'patches/',
-  'packages/dsh-multitask/',
   'src/'
 ]
 const TICKET_PATCH_COMMIT = '5963df78f5a15534633bb7e29666c1c836de8cac'
@@ -442,7 +441,9 @@ function assertForbiddenWork() {
   // The integration head contains sibling ticket commits. Diffing from the
   // common base therefore reports ticket #6's host files as #11 work. Keep
   // the forbidden-work observation tied to #11's own patch identity, then
-  // include any staged/unstaged writes made while running this gate.
+  // include any staged/unstaged writes made while running this gate. The
+  // host package itself is no longer forbidden: the success-phase ticket
+  // (MT-81) legitimately publishes `multitask/phase` events host-side.
   const ticketPatch = execFileSync(
     'git',
     ['diff', '--name-only', '--no-renames', `${TICKET_PATCH_COMMIT}^`, TICKET_PATCH_COMMIT],

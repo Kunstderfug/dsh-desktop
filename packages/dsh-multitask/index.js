@@ -90,12 +90,14 @@ export {
   PROJECTION_KEY,
   OrchestratorModeController,
   foldOpenTasks,
+  foldTerminalTasks,
   orchestratorModeProjectionDefinition,
   registerOrchestratorMode
 } from './orchestrator-mode.js'
 export {
   DEFAULT_MAX_CONSECUTIVE_WAKES,
   isMultitaskHandoffSource,
+  isTerminalTask,
   latestTask,
   registerRoundDriver,
   renderHandoffPrompt,
@@ -146,6 +148,14 @@ const STARTUP_LINE = '[multitask] plugin active'
 
 /** Live child id → the parent session and minted task awaiting settlement. */
 const pendingResearchers = new Map()
+
+/**
+ * Dispatched writer child id → `{ session, parentId, taskId }`.
+ * Populated through the guardrails writer-acquire hook so writer success and
+ * failure attribution never depends on `latestTask` when several writers run
+ * concurrently for different tasks.
+ */
+const writerTasks = new Map()
 
 /** Child session id → parent session id for host-side release-on-settle. */
 const childParents = new Map()
@@ -233,22 +243,111 @@ function taskObjective(session, taskId) {
 }
 
 /**
- * Publish one user-visible task failure. The first researcher failure stays
- * on the log; this card is the terminal, actionable outcome.
+ * Publish one user-visible task-phase event. The first researcher failure
+ * stays on the log; failure and done cards are the terminal outcomes.
+ * Every phase event carries the task id so the client fold always lands it
+ * on the right card (the fold skips events without an id).
+ *
+ * @param session - parent session log.
+ * @param task - `{ id, objective }`.
+ * @param phase - lifecycle phase (`orchestrating`, `writing`, `verifying`, `done`, `failed`).
+ * @param extras - stop reason, note, and optional child id.
+ */
+function publishTaskPhase(session, task, phase, extras = {}) {
+  if (task?.id == null) return
+  session.append('multitask/phase', {
+    id: task.id,
+    objective: task.objective,
+    phase,
+    createdAt: new Date().toISOString(),
+    ...extras
+  })
+}
+
+/**
+ * Publish one user-visible task failure (delegates to `publishTaskPhase`).
  *
  * @param session - parent session log.
  * @param task - `{ id, objective }`.
  * @param extras - stop reason, note, and optional child id.
  */
 function publishTaskFailure(session, task, extras = {}) {
-  if (task?.id == null) return
-  session.append('multitask/phase', {
-    id: task.id,
-    objective: task.objective,
-    phase: 'failed',
-    createdAt: new Date().toISOString(),
-    ...extras
-  })
+  publishTaskPhase(session, task, 'failed', extras)
+}
+
+/**
+ * Whether the log already holds a terminal (`done` / `failed`) phase event
+ * for one task. Guards duplicate terminal publications across the fold.
+ *
+ * @param session - parent session log.
+ * @param taskId - `MT-n` identity.
+ */
+function hasTerminalPhase(session, taskId) {
+  const id = String(taskId)
+  for (const event of session.snapshotEvents()) {
+    if (event.type !== 'multitask/phase') continue
+    if (String(event.data?.id ?? '') !== id) continue
+    if (event.data?.phase === 'done' || event.data?.phase === 'failed') return true
+  }
+  return false
+}
+
+/**
+ * Resolve the live parent agent for one session, for mode-close proposals.
+ *
+ * @param ctx - host context.
+ * @param session - parent session.
+ */
+function agentForSession(ctx, session) {
+  if (session == null) return undefined
+  return ctx.get?.('agents')?.get(String(session.id))
+}
+
+/**
+ * Propose closing one terminal task in orchestrator mode. The controller
+ * commits at the next accepted `agent/pre-step` — an idle parent keeps the
+ * deactivation pending, exactly like activation today.
+ *
+ * @param ctx - host context.
+ * @param mode - optional orchestrator-mode controller.
+ * @param session - parent session.
+ * @param taskId - `MT-n` identity.
+ */
+function closeTaskMode(ctx, mode, session, taskId) {
+  if (mode == null || taskId == null) return
+  const agent = agentForSession(ctx, session)
+  if (agent === undefined) return
+  try {
+    mode.noteTaskClosed(agent, taskId)
+  } catch (error) {
+    console.error('[multitask] task-close proposal failed:', error && error.stack ? error.stack : error)
+  }
+}
+
+/**
+ * Record a writer dispatch on the parent log (`phase: 'writing'`) and
+ * remember the attribution for settle time. Called through the guardrails
+ * writer-acquire seam, so researchers never land here.
+ *
+ * @param ctx - host context.
+ * @param childId - durable writer child id.
+ * @param parentId - parent session id.
+ * @param taskId - `MT-n` identity from the dispatch reservation, when known.
+ */
+function noteWriterDispatch(ctx, childId, parentId, taskId) {
+  const id = String(parentId ?? '')
+  if (childId == null || id.length === 0) return
+  const session = ctx.get?.('sessions')?.get(id) ?? ctx.get?.('agents')?.get(id)?.session
+  if (session == null) return
+  const resolvedTaskId = taskId ?? latestTask(session)?.id
+  if (resolvedTaskId == null) return
+  const task = { id: resolvedTaskId, objective: taskObjective(session, resolvedTaskId) }
+  writerTasks.set(String(childId), { session, parentId: id, taskId: resolvedTaskId })
+  try {
+    publishTaskPhase(session, task, 'writing', { childId: String(childId) })
+  } catch (error) {
+    console.error('[multitask] writing-phase publication failed:', error && error.stack ? error.stack : error)
+  }
 }
 
 /**
@@ -278,7 +377,7 @@ function knownToolNames(ctx, agent) {
   }
 }
 
-async function launchResearcherRetry(ctx, pending) {
+async function launchResearcherRetry(ctx, pending, mode) {
   const subagents = ctx.get?.('subagents')
   if (typeof subagents?.startContinuable !== 'function') {
     publishTaskFailure(pending.session, pending.task, {
@@ -286,6 +385,7 @@ async function launchResearcherRetry(ctx, pending) {
       stopReason: 'error',
       note: 'Researcher failed after one retry. Review the stop reason and retry the task.'
     })
+    closeTaskMode(ctx, mode, pending.session, pending.task.id)
     return
   }
   try {
@@ -322,6 +422,7 @@ async function launchResearcherRetry(ctx, pending) {
       stopReason: 'error',
       note: 'Researcher failed after one retry. Review the stop reason and retry the task.'
     })
+    closeTaskMode(ctx, mode, pending.session, pending.task.id)
   }
 }
 
@@ -329,13 +430,17 @@ async function launchResearcherRetry(ctx, pending) {
  * Record a researcher settlement on the parent session that owns the child.
  *
  * When the round driver is mounted, the first failure retries once. The first
- * `research-failed` row stays in the log so a retry cannot hide it.
+ * `research-failed` row stays in the log so a retry cannot hide it. A
+ * successful research settlement publishes a durable `orchestrating` phase
+ * event (the client fold maps `researched` → `orchestrating`), and a terminal
+ * failure closes the task in orchestrator mode.
  *
  * @param ctx - host context.
  * @param info - `subagent/end` payload from SubagentRuntime.
  * @param driver - optional enabled round driver.
+ * @param mode - optional orchestrator-mode controller.
  */
-async function recordResearchSettlement(ctx, info, driver) {
+async function recordResearchSettlement(ctx, info, driver, mode) {
   const childId = String(info.id)
   const pending = pendingResearchers.get(childId)
   if (pending === undefined) return false
@@ -351,7 +456,7 @@ async function recordResearchSettlement(ctx, info, driver) {
     stopReason: info.stopReason
   })
   if (phase === 'research-failed' && driver != null && shouldRetryResearch(pending.session, pending.task.id)) {
-    await launchResearcherRetry(ctx, pending)
+    await launchResearcherRetry(ctx, pending, mode)
     return true
   }
   if (phase === 'research-failed') {
@@ -360,6 +465,12 @@ async function recordResearchSettlement(ctx, info, driver) {
       stopReason: info.stopReason,
       note: 'Researcher failed after one retry. Review the stop reason and retry the task.'
     })
+    closeTaskMode(ctx, mode, pending.session, pending.task.id)
+  } else {
+    publishTaskPhase(pending.session, pending.task, 'orchestrating', {
+      childId,
+      label: RESEARCHER_LABEL
+    })
   }
   driver?.notifySettlement(pending.agent, pending.task)
   return true
@@ -367,32 +478,76 @@ async function recordResearchSettlement(ctx, info, driver) {
 
 /**
  * Surface a writer settlement failure as a failure card. Host release of that
- * owner's claims happens in the settle `finally`.
+ * owner's claims happens in the settle `finally`. Attribution prefers the
+ * dispatch-time writer record so concurrent writers on different tasks never
+ * cross-attribute through `latestTask`.
  *
  * @param ctx - host context.
  * @param info - `subagent/end` payload.
+ * @param entry - optional dispatch-time attribution record.
+ * @returns `{ session, taskId }` when a failure was published, else `undefined`.
  */
-function publishWriterFailure(ctx, info) {
-  if (mapResearchSettlement(info.stopReason) === 'researched') return
-  const session = sessionForSettledChild(ctx, info.id)
-  if (session == null) return
+function publishWriterFailure(ctx, info, entry) {
+  if (mapResearchSettlement(info.stopReason) === 'researched') return undefined
+  const session = entry?.session ?? sessionForSettledChild(ctx, info.id)
+  if (session == null) {
+    console.error(`[multitask] writer child ${String(info.id)} settled unsuccessfully but its parent session could not be resolved; no failure card was published`)
+    return undefined
+  }
   const owner = String(info.id)
   const owned = effectiveClaims(session).filter(claim => String(claim.ownerSessionId) === owner)
-  const taskId = owned[0]?.taskId ?? latestTask(session)?.id
-  if (taskId == null) return
+  const taskId = entry?.taskId ?? owned[0]?.taskId ?? latestTask(session)?.id
+  if (taskId == null) return undefined
   publishTaskFailure(session, { id: taskId, objective: taskObjective(session, taskId) }, {
     reason: 'writer',
     stopReason: info.stopReason,
     childId: owner,
     note: 'Writer failed. Claims were released. Review the diff handoff or retry the task.'
   })
+  return { session, taskId }
 }
 
-async function settleChild(ctx, info, driver, guardrails) {
+/**
+ * Settle one non-researcher child.
+ *
+ * A successful writer publishes `verifying` while another live writer for the
+ * same task remains, and otherwise publishes `done` exactly once and closes
+ * the task in orchestrator mode. `done` means the writer handoff completed —
+ * it does not claim human review. Programmatic writer starts that never went
+ * through the guardrails dispatch seam keep the historical silent behavior.
+ *
+ * @param ctx - host context.
+ * @param info - `subagent/end` payload.
+ * @param guardrails - optional guardrails controller.
+ * @param mode - optional orchestrator-mode controller.
+ */
+function settleWriterChild(ctx, info, guardrails, mode) {
+  const childId = String(info.id)
+  const succeeded = mapResearchSettlement(info.stopReason) === 'researched'
+  const entry = writerTasks.get(childId)
+  writerTasks.delete(childId)
+  if (succeeded && entry != null) {
+    const task = { id: entry.taskId, objective: taskObjective(entry.session, entry.taskId) }
+    if (task.id == null || hasTerminalPhase(entry.session, task.id)) return
+    const liveOthers = (guardrails?.liveWriterIds?.(entry.parentId) ?? [])
+      .filter(id => id !== childId && writerTasks.get(id)?.taskId === task.id)
+    if (liveOthers.length > 0) {
+      publishTaskPhase(entry.session, task, 'verifying', { childId })
+      return
+    }
+    publishTaskPhase(entry.session, task, 'done', { childId })
+    closeTaskMode(ctx, mode, entry.session, task.id)
+    return
+  }
+  const attributed = publishWriterFailure(ctx, info, entry)
+  if (attributed !== undefined) closeTaskMode(ctx, mode, attributed.session, attributed.taskId)
+}
+
+async function settleChild(ctx, info, driver, guardrails, mode) {
   const wasResearcher = pendingResearchers.has(String(info.id))
   try {
-    const handled = await recordResearchSettlement(ctx, info, driver)
-    if (!wasResearcher && handled !== true) publishWriterFailure(ctx, info)
+    if (wasResearcher) await recordResearchSettlement(ctx, info, driver, mode)
+    else settleWriterChild(ctx, info, guardrails, mode)
   } finally {
     guardrails?.releaseChild?.(String(info.id))
     await releaseSettledOwnerClaims(ctx, info)
@@ -544,7 +699,8 @@ export function apply(ctx, config) {
   const guardrailsConfig = resolveGuardrailsConfig(config)
   const guardrails = registerGuardrails(ctx, {
     maxWriters: guardrailsConfig.maxWriters,
-    driverConfig
+    driverConfig,
+    onWriterStart: (childId, parentId, taskId) => noteWriterDispatch(ctx, childId, parentId, taskId)
   })
   const driver = driverConfig.enabled ? registerRoundDriver(ctx, driverConfig) : undefined
   guardrails?.bindDriver(driver)
@@ -552,7 +708,7 @@ export function apply(ctx, config) {
   ctx.on?.('agent/created', ({ agent }) => {
     rememberChildParent(agent.session.id, agent.session.header.parentSession)
   })
-  ctx.on?.('subagent/end', (info) => settleChild(ctx, info, driver, guardrails))
+  ctx.on?.('subagent/end', (info) => settleChild(ctx, info, driver, guardrails, mode))
   registerClaims(ctx)
   if (typeof ctx.commands?.register !== 'function') return
   ctx.commands.register({

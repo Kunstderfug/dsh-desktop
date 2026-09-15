@@ -662,6 +662,91 @@ describe('multitask_hardening_gate abuse and cancel', () => {
   })
 })
 
+describe('multitask_hardening_gate success publication', () => {
+  it('publishes orchestrating/writing/done phases, closes mode, and renders State: done', { timeout: 30_000 }, async () => {
+    const hold = gate()
+    const f = await fixture({
+      respond: async (call) => {
+        if (isWriterCall(call, 'writer completes the handoff')) {
+          await holdUntil(call.request.signal, hold.promise)
+          return 'writer diff handoff ready'
+        }
+        return defaultRespond(call)
+      }
+    })
+
+    await runCommand(f.ctx, f.agent, '/multitask publish the success path')
+    await waitFor(() => researchEvents(f.agent).some(event => event.phase === 'researched'), 'researcher settled')
+    expect(phaseEvents(f.agent).some(event => event.id === 'MT-1' && event.phase === 'orchestrating')).toBe(true)
+
+    const started = await runSubagent(f.ctx, f.agent, 'writer-success', 'writer completes the handoff')
+    expect(started.isError).toBe(false)
+    await waitFor(() => phaseEvents(f.agent).some(event => event.id === 'MT-1' && event.phase === 'writing'), 'writing phase published')
+    const writing = phaseEvents(f.agent).find(event => event.phase === 'writing')
+    expect(String(writing?.childId ?? '')).not.toBe('')
+    expect(writing?.id).toBe('MT-1')
+
+    hold.open()
+    await waitFor(() => phaseEvents(f.agent).some(event => event.id === 'MT-1' && event.phase === 'done'), 'done phase published')
+    expect(phaseEvents(f.agent).filter(event => event.id === 'MT-1' && event.phase === 'done')).toHaveLength(1)
+    expect(phaseEvents(f.agent).some(event => event.id === 'MT-1' && event.phase === 'failed')).toBe(false)
+
+    const card = foldCard(f.agent, 'MT-1')
+    expect(card.task.failed).toBe(false)
+    expect(card.task.phase).toBe('done')
+    expect(card.text).toContain('State: done')
+
+    // The mode close is proposed at publish time and commits at the next
+    // accepted pre-step — the same pending limitation as activation.
+    f.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'acknowledge the finished task' }],
+      source: { kind: 'user' }
+    }))
+    await f.agent.whenIdle()
+    expect(modeView(f.ctx, f.agent)).toEqual({ active: false, openTasks: [] })
+  })
+
+  it('publishes verifying between two writers and done only after the last settle', { timeout: 30_000 }, async () => {
+    const holdA = gate()
+    const holdB = gate()
+    const f = await fixture({
+      maxWriters: 2,
+      respond: async (call) => {
+        if (isWriterCall(call, 'writer A settles first')) {
+          await holdUntil(call.request.signal, holdA.promise)
+          return 'writer A diff handoff ready'
+        }
+        if (isWriterCall(call, 'writer B settles last')) {
+          await holdUntil(call.request.signal, holdB.promise)
+          return 'writer B diff handoff ready'
+        }
+        return defaultRespond(call)
+      }
+    })
+
+    await runCommand(f.ctx, f.agent, '/multitask two writers one done')
+    await waitFor(() => researchEvents(f.agent).some(event => event.phase === 'researched'), 'researcher settled')
+
+    const first = await runSubagent(f.ctx, f.agent, 'writer-a', 'writer A settles first')
+    const second = await runSubagent(f.ctx, f.agent, 'writer-b', 'writer B settles last')
+    expect(first.isError).toBe(false)
+    expect(second.isError).toBe(false)
+    await waitFor(async () => (await liveWriterIds(f.ctx, f.agent)).length >= 2, 'two live writers')
+
+    holdA.open()
+    await waitFor(() => phaseEvents(f.agent).some(event => event.phase === 'verifying'), 'verifying phase published')
+    expect(phaseEvents(f.agent).some(event => event.phase === 'done')).toBe(false)
+    expect(modeView(f.ctx, f.agent)).toEqual({ active: true, openTasks: ['MT-1'] })
+
+    holdB.open()
+    await waitFor(() => phaseEvents(f.agent).some(event => event.phase === 'done'), 'done only after last settle')
+    expect(phaseEvents(f.agent).filter(event => event.phase === 'done')).toHaveLength(1)
+    const card = foldCard(f.agent, 'MT-1')
+    expect(card.task.phase).toBe('done')
+    expect(card.task.failed).toBe(false)
+  })
+})
+
 describe('multitask_hardening_gate approval and narrow surface', () => {
   it('pins writer approval never, inherits sandbox, and names the failure on narrow text', { timeout: 30_000 }, async () => {
     const hold = gate()

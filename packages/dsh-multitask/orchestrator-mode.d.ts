@@ -71,6 +71,9 @@ declare module '@deepseek-ai/cordis' {
 /** Fold open-task ids from the session log. */
 export declare function foldOpenTasks(session: Session): string[]
 
+/** Fold task ids whose host-published `multitask/phase` is terminal. */
+export declare function foldTerminalTasks(session: Session): Set<string>
+
 /** Projection of committed orchestrator mode and cropped wire view. */
 export declare const orchestratorModeProjectionDefinition: {
   key: 'multitask-mode'

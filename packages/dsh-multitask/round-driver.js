@@ -85,6 +85,39 @@ export function latestTask(session) {
   return task
 }
 
+/**
+ * Whether a task's host-published `multitask/phase` is terminal (`done` or
+ * `failed`). Terminal tasks are never wake-eligible, so a finished card
+ * neither resurrects a closed task nor consumes the shared wake budget.
+ *
+ * @param session - parent session log.
+ * @param taskId - `MT-n` identity.
+ */
+export function isTerminalTask(session, taskId) {
+  const id = String(taskId)
+  for (const event of session.snapshotEvents()) {
+    if (event.type !== 'multitask/phase') continue
+    if (String(event.data?.id ?? '') !== id) continue
+    if (event.data?.phase === 'done' || event.data?.phase === 'failed') return true
+  }
+  return false
+}
+
+/** Latest task that has not reached a terminal phase, if any. */
+function latestOpenTask(session) {
+  let task
+  for (const event of session.snapshotEvents()) {
+    if (event.type !== 'multitask/task') continue
+    const id = String(event.data?.id ?? '')
+    if (id.length === 0 || isTerminalTask(session, id)) continue
+    task = {
+      id,
+      objective: String(event.data?.objective ?? '')
+    }
+  }
+  return task
+}
+
 function sameQueued(content, source, attempt) {
   return isMultitaskHandoffSource(source)
     && source.taskId === attempt.taskId
@@ -301,8 +334,14 @@ export function registerRoundDriver(ctx, config) {
   function notifySettlement(agent, task) {
     const state = stateFor(agent)
     if (state.stopping || state.disarmed) return
-    if (task?.id != null) state.wakeTask = { id: task.id, objective: String(task.objective ?? '') }
-    else state.wakeTask = latestTask(agent.session) ?? state.wakeTask
+    const requested = task?.id != null
+      ? task
+      : latestTask(agent.session) ?? state.wakeTask
+    const openTask = requested != null && !isTerminalTask(agent.session, requested.id)
+      ? requested
+      : latestOpenTask(agent.session)
+    if (openTask == null) return
+    state.wakeTask = { id: openTask.id, objective: String(openTask.objective ?? '') }
     state.needsWake = true
     if (agent.status === 'idle') requestDrive(state)
   }

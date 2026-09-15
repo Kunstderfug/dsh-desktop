@@ -196,7 +196,7 @@ window.__ModuleLoader__.load({
         claims.length > 0 ? `Claims: ${claims.join(', ')}` : '',
         ...notes,
         BASH_TIER2_SCOPE_NOTE,
-        task.failed ? 'State: failed' : ''
+        task.failed ? 'State: failed' : (task.phase === 'done' ? 'State: done' : '')
       ].filter((line) => line !== '').join('\n')
     }
 

@@ -512,6 +512,60 @@ describe('multitask_orchestrator_mode_gate guidance and writer dispatch', () => 
 })
 
 describe('multitask_orchestrator_mode_gate pending close, resume, and fork', () => {
+  it('closes a terminal task on resume without re-opening finished work', { timeout: 20_000 }, async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'dsh-multitask-orchestrator-terminal-'))
+    cleanups.push(() => rm(home, { recursive: true, force: true }))
+
+    const first = await fixture({ home, detached: true })
+    const agent = await first.agent('session-1')
+    await runCommand(first, agent, '/multitask finish before the restart')
+    await agent.whenIdle()
+    await waitFor(() => agent.session.snapshotEvents().some(event =>
+      event.type === 'multitask/research'
+      && (event.data as { phase?: string }).phase === 'researched'),
+    'researcher settled')
+    expect(agent.session.snapshotEvents().some(event =>
+      event.type === 'multitask/phase'
+      && (event.data as { phase?: string }).phase === 'orchestrating')).toBe(true)
+
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'orchestrate the terminal task' }],
+      source: { kind: 'user' }
+    }))
+    await agent.whenIdle()
+    expect(modeView(first.ctx, agent)).toEqual({ active: true, openTasks: ['MT-1'] })
+
+    agent.session.append('multitask/phase', {
+      id: 'MT-1',
+      objective: 'finish before the restart',
+      phase: 'done',
+      createdAt: new Date().toISOString()
+    })
+    await first.disposeAll()
+
+    const resumed = await fixture({ home })
+    const handle = await resumed.ctx.agents.resume({
+      resumeSessionId: SessionId('session-1'),
+      agentOptions: { provider: 'scripted', model: 'orchestrator' }
+    })
+    cleanups.push(() => handle.dispose())
+
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'implement the feature yourself after resume' }],
+      source: { kind: 'user' }
+    }))
+    await handle.agent.whenIdle()
+    expect(modeView(resumed.ctx, handle.agent), 'a resumed terminal task must not stay active').toEqual({
+      active: false,
+      openTasks: []
+    })
+    const afterResume = resumed.calls.find(call =>
+      call.model === 'orchestrator'
+      && userText(call.request).includes('after resume'))
+    expect(afterResume).toBeDefined()
+    expect(systemText(afterResume!.request)).not.toContain('do not implement the task yourself')
+  })
+
   it('deactivates at the next accepted boundary and restores the folded view on resume and fork', { timeout: 20_000 }, async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'dsh-multitask-orchestrator-resume-'))
     cleanups.push(() => rm(home, { recursive: true, force: true }))

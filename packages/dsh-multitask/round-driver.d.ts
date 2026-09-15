@@ -99,6 +99,9 @@ export declare function renderHandoffPrompt(
 /** Latest fold-derived task on a session log, if any. */
 export declare function latestTask(session: Session): MultitaskDriverTask | undefined
 
+/** Whether a task's folded `multitask/phase` is terminal (`done` or `failed`). */
+export declare function isTerminalTask(session: Session, taskId: string): boolean
+
 /** Install automatic handoff reservations, settlement wakes, and race fences. */
 export declare function registerRoundDriver(
   ctx: Context,

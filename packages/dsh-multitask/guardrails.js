@@ -63,6 +63,10 @@ export function formatWriterCapRefusal({ maxWriters, activeWriters, maxConsecuti
   })
 }
 
+function renderCallbackError(error) {
+  return error instanceof Error ? error.message : String(error)
+}
+
 function isResearcherSpec(spec) {
   const label = spec?.label ?? spec?.request?.label
   if (label === RESEARCHER_LABEL) return true
@@ -123,6 +127,8 @@ export class MultitaskGuardrails extends Service {
     this.maxWriters = options.maxWriters
     this.driverConfig = options.driverConfig
     this.driver = options.driver
+    /** Optional host callback `(childId, parentId, taskId)` at writer admission. */
+    this.onWriterStart = options.onWriterStart
     this.reservations = new Map()
     this.pendingByExec = new WeakMap()
     this.inflightByParent = new Map()
@@ -326,6 +332,13 @@ export class MultitaskGuardrails extends Service {
         if (store != null && !isResearcherSpec(spec)) {
           self.bindChild(store.reservationId, result?.childId)
           if (store.parentId != null) self.inflightByParent.delete(store.parentId)
+          if (result?.childId != null) {
+            try {
+              self.onWriterStart?.(String(result.childId), store.parentId, self.reservations.get(store.reservationId)?.taskId)
+            } catch (error) {
+              self.ctx.logger?.warn?.(`multitask-guardrails: writer-start callback failed: ${renderCallbackError(error)}`)
+            }
+          }
         }
         return result
       } catch (error) {

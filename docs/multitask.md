@@ -31,11 +31,13 @@ A task card appears in the conversation with the minted id, the objective, and t
 
 After the running turn ends, the main Agent continues in **orchestrator mode** in the same session:
 
-1. It inspects the researcher. If research has already settled, the parent notice carries a summary; the orchestrator retrieves the full structured report (goal, affected paths, plan, risks, recommended claim set).
+1. It inspects the researcher. If research has already settled, the parent notice carries a summary; the orchestrator retrieves the full structured report (goal, affected paths, plan, risks, recommended claim set). A durable `orchestrating` phase event is published when research settles, so the task card survives resume and fork.
 2. If the first researcher attempt fails, the host retries once. A second failure publishes a visible failed task card.
 3. The orchestrator claims the report's paths for `MT-n`. A path already held by another live task is refused.
-4. It dispatches a **writer** subagent with the research report, the implementation brief, and the live claim table. The writer claims before it edits and releases when it finishes.
+4. It dispatches a **writer** subagent with the research report, the implementation brief, and the live claim table. The writer claims before it edits and releases when it finishes. The host publishes a `writing` phase event at dispatch.
 5. The orchestrator reviews the handoff (done / concerns / deviations), releases leftover claims, and reports back in this conversation. Orchestrator mode stays active while any multitask tasks remain open.
+
+Task phases are published host-side on `multitask/phase` events, so the card chips advance without a model turn. The terminal `done` phase means **the writer handoff completed** — the last live writer for the task settled successfully; it does **not** mean a human reviewed the diff. While another writer for the same task is still live, the settling writer only publishes `verifying`; the last settle publishes `done`. Every terminal phase (`done` or `failed`) also closes the task in orchestrator mode, so the `multitask:orchestrator` prompt section retires when the last open task finishes; the close commits at the next accepted step, exactly like activation. Resume and fork re-fold the log: tasks whose phase is terminal are not re-opened, and their settlements do not consume the shared wake budget.
 
 Resume and fork restore the same tasks and claims by folding the session log. Claims whose owner subagent is no longer running expire.
 
@@ -57,7 +59,7 @@ Two shipped defaults bound cost. They are plugin config on `dsh-multitask` and m
 | Key | Shipped default | Constant | What it bounds |
 | --- | --- | --- | --- |
 | `multitask.maxWriters` | 2 | `DEFAULT_MAX_WRITERS` | Live descendant writers plus dispatch reservations. Researchers do not consume a slot. A further writer `subagent` call is refused with `WRITER_CAP` until a slot frees or a later round runs. |
-| Shared driver bound (`maxConsecutiveWakes`) | 3 | `DEFAULT_MAX_CONSECUTIVE_WAKES` | Consecutive automatic orchestrator wakes after researcher/writer settlement. User input resets the counter. At the bound, settlement no longer re-wakes the parent. |
+| Shared driver bound (`maxConsecutiveWakes`) | 3 | `DEFAULT_MAX_CONSECUTIVE_WAKES` | Consecutive automatic orchestrator wakes after researcher/writer settlement for a still-open task. User input resets the counter. At the bound, settlement no longer re-wakes the parent; settlements of already-terminal (`done`/`failed`) tasks are not wake-eligible at all. |
 
 Omit either field to keep the shipped default. `multitask.maxWriters` must be a positive safe integer; invalid values fail closed. The driver bound is the same shared wake budget the writer-cap refusal narrates — do not invent a second counter.
 

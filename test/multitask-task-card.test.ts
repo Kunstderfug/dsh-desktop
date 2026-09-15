@@ -277,6 +277,10 @@ describe('multitask task-card fold', () => {
       phase: 'done',
       failed: false
     })
+    expect(plugin.formatTaskCardText(cards[1]!)).toContain('State: done')
+    expect(plugin.formatTaskCardText(cards[1]!)).not.toContain('State: failed')
+    expect(plugin.formatTaskCardText(cards[0]!)).toContain('State: failed')
+    expect(plugin.formatTaskCardText(cards[0]!)).not.toContain('State: done')
   })
 
   it('maps the host research vocabulary onto the declared chip phases', async () => {

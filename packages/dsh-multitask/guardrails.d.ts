@@ -69,10 +69,13 @@ export declare class MultitaskGuardrails extends Service {
   readonly maxWriters: number
   readonly driverConfig: ResolvedRoundDriverConfig
   driver?: MultitaskRoundDriver
+  /** Optional host callback `(childId, parentId, taskId)` at writer admission. */
+  onWriterStart?: (childId: string, parentId: string, taskId?: string) => void
   constructor(ctx: Context, options: {
     maxWriters: number
     driverConfig: ResolvedRoundDriverConfig
     driver?: MultitaskRoundDriver
+    onWriterStart?: (childId: string, parentId: string, taskId?: string) => void
   })
   bindDriver(driver?: MultitaskRoundDriver): void
   snapshotBudget(agent: Agent): {
@@ -82,6 +85,7 @@ export declare class MultitaskGuardrails extends Service {
   }
   protectedPaths(agent: Agent): string[]
   capacitySnapshot(agent: Agent): WriterCapacitySnapshot
+  liveWriterIds(parentId: string): string[]
   releaseChild(childId: string): void
 }
 
@@ -92,5 +96,6 @@ export declare function registerGuardrails(
     maxWriters: number
     driverConfig: ResolvedRoundDriverConfig
     driver?: MultitaskRoundDriver
+    onWriterStart?: (childId: string, parentId: string, taskId?: string) => void
   }
 ): MultitaskGuardrails | undefined
