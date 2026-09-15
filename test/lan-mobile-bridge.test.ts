@@ -3,6 +3,7 @@ import { createServer, request as httpRequest, type IncomingMessage } from 'node
 import { createRequire } from 'node:module'
 import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
+import type { InternetTunnelInstance, TunnelRuntimeState } from '../src/main/mobile/internet-tunnel'
 import {
   isInternetTunnelHost,
   isPrivateAddress,
@@ -979,6 +980,314 @@ describe('LAN mobile bridge user questions', () => {
         }
       }
     ])
+  })
+})
+
+describe('mobile idle efficiency', () => {
+  it('reuses one session/list serialization and history page per poll burst and rebuilds on expiry and mutation', async () => {
+    let listCount = 0
+    let pageCount = 0
+    let promptCount = 0
+    const projections = { asOfSeq: 7, values: {} }
+    const records = [{ type: 'event', event: { type: 'user/message', time: 1 } }]
+    const harness = createServer(async (request, response) => {
+      if (request.method !== 'POST') {
+        response.statusCode = 404
+        response.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      for await (const chunk of request) chunks.push(Buffer.from(chunk))
+      const envelope = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+        rpcId: string
+        method: string
+      }
+      let value: unknown
+      if (envelope.method === 'session/list') {
+        listCount += 1
+        value = { items: [{ sessionId: 'session-1', updatedAt: 1, running: false, blank: false, projections }] }
+      } else if (envelope.method === 'session/page') {
+        pageCount += 1
+        value = { records, hasMore: false }
+      } else if (envelope.method === 'session/prompt') {
+        promptCount += 1
+        value = {}
+      } else {
+        value = {}
+      }
+      response.setHeader('content-type', 'application/json')
+      response.end(JSON.stringify({
+        type: 'server-response',
+        rpcId: envelope.rpcId,
+        result: { ok: true, value }
+      }))
+    })
+    servers.push(harness)
+    await new Promise<void>((resolve) => harness.listen(0, '127.0.0.1', resolve))
+    const harnessPort = (harness.address() as AddressInfo).port
+    let now = Date.now()
+    const bridge = new LanMobileBridge({
+      harnessUrl: () => `http://127.0.0.1:${harnessPort}`,
+      now: () => now
+    })
+    bridges.push(bridge)
+    const { port, cookie } = await pairBridge(bridge)
+    const history = () =>
+      mobileRpc(port, cookie, 'session.history', { sessionId: 'session-1', maxMessages: 100 })
+
+    // A burst of polls costs one serialization and one page fetch.
+    await history()
+    await history()
+    expect(listCount).toBe(1)
+    expect(pageCount).toBe(1)
+
+    // Beyond the short TTL the list (shared by session.list) is rebuilt once,
+    // and the expired history page with it.
+    now += 751
+    const firstList = await mobileRpc(port, cookie, 'session.list', {})
+    const secondList = await mobileRpc(port, cookie, 'session.list', {})
+    expect(firstList.status).toBe(200)
+    expect(await secondList.json()).toEqual(await firstList.clone().json())
+    expect(listCount).toBe(2)
+    await history()
+    expect(listCount).toBe(2)
+    expect(pageCount).toBe(2)
+
+    // A forwarded mutation invalidates immediately: the next poll refetches.
+    const prompt = await mobileRpc(port, cookie, 'session.prompt', {
+      sessionId: 'session-1',
+      mode: 'steer',
+      content: [{ type: 'text', text: 'go' }]
+    })
+    expect(prompt.status).toBe(200)
+    expect(promptCount).toBe(1)
+    await history()
+    expect(listCount).toBe(3)
+    expect(pageCount).toBe(3)
+  })
+
+  it('drops the workspace baseline when the mux drops so the next poll rebuilds it', async () => {
+    const muxClients: (TestWebSocket & { close(): void })[] = []
+    const harness = createServer((_request, response) => {
+      response.statusCode = 404
+      response.end()
+    })
+    const muxServer = new WebSocketServer({ noServer: true })
+    webSocketServers.push(muxServer)
+    harness.on('upgrade', (request, socket, head) => {
+      if (request.url !== '/api/remote.mux') return socket.destroy()
+      muxServer.handleUpgrade(request, socket, head, (client) => {
+        muxClients.push(client as TestWebSocket & { close(): void })
+        client.send(JSON.stringify({
+          type: 'item',
+          streamId: 'mobile-workspaces',
+          value: { type: 'baseline', value: { items: [{ workspaceId: 'ws-1' }], archivedSessionIds: [] } }
+        }))
+      })
+    })
+    servers.push(harness)
+    await new Promise<void>((resolve) => harness.listen(0, '127.0.0.1', resolve))
+    const harnessPort = (harness.address() as AddressInfo).port
+    const bridge = new LanMobileBridge({
+      harnessUrl: () => `http://127.0.0.1:${harnessPort}`
+    })
+    bridges.push(bridge)
+    const { port, cookie } = await pairBridge(bridge)
+
+    await waitFor(async () => {
+      const response = await mobileRpc(port, cookie, 'workspace.list', {})
+      return (await response.json()).ok === true
+    })
+
+    // A carrier that delivered data and died leaves nothing stale behind.
+    muxClients.forEach((client) => client.close())
+    await waitFor(async () => {
+      const response = await mobileRpc(port, cookie, 'workspace.list', {})
+      return (await response.json()).ok === false
+    })
+    const stale = await mobileRpc(port, cookie, 'workspace.list', {})
+    expect(await stale.json()).toMatchObject({
+      ok: false,
+      error: 'Harness workspaces are not loaded yet.'
+    })
+
+    // A phone is still attached, so the monitor reconnects and the opening
+    // baseline repopulates the snapshot.
+    await waitFor(async () => {
+      const response = await mobileRpc(port, cookie, 'workspace.list', {})
+      return (await response.json()).ok === true
+    }, 5000)
+  })
+
+  it('bounds pending pairing requests by count and age', async () => {
+    let now = Date.now()
+    const bridge = new LanMobileBridge({
+      harnessUrl: () => 'http://127.0.0.1:9999',
+      now: () => now
+    })
+    bridges.push(bridge)
+    const snapshot = await bridge.start()
+    const pendings = () =>
+      (bridge as unknown as { pendingPairings: Map<string, { expiresAt: number }> }).pendingPairings
+    const reconnectFrom = (address: string) =>
+      fetch(`http://127.0.0.1:${snapshot.port}/reconnect`, {
+        headers: { 'cf-connecting-ip': address, 'cf-ray': `ray-${address}` }
+      })
+
+    // Every scan/retry used to insert an entry nobody removed.
+    for (let i = 1; i <= 24; i++) await reconnectFrom(`203.0.113.${i}`)
+    expect(pendings().size).toBeLessThanOrEqual(16)
+
+    // Expired entries are purged on the next insert instead of accumulating.
+    now += 5 * 60 * 1000 + 1
+    await reconnectFrom('203.0.114.1')
+    expect(pendings().size).toBe(1)
+  })
+
+  it('ends the session stream once buffered SSE backpressure exceeds the cap', async () => {
+    const frameText = 'x'.repeat(256 * 1024)
+    let peerClosed = false
+    const harness = createServer((_request, response) => {
+      response.statusCode = 404
+      response.end()
+    })
+    const muxServer = new WebSocketServer({ noServer: true })
+    webSocketServers.push(muxServer)
+    harness.on('upgrade', (request, socket, head) => {
+      if (request.url !== '/api/remote.mux') return socket.destroy()
+      muxServer.handleUpgrade(request, socket, head, (client) => {
+        const peer = client as TestWebSocket & {
+          on(event: 'message', listener: (data: Buffer) => void): void
+          on(event: 'close', listener: () => void): void
+        }
+        peer.on('close', () => {
+          peerClosed = true
+        })
+        peer.on('message', (data) => {
+          const opened = JSON.parse(data.toString('utf8')) as {
+            streamId: string
+            endpoint: string
+          }
+          if (opened.endpoint !== 'session/follow') return
+          const frame = JSON.stringify({
+            type: 'item',
+            streamId: opened.streamId,
+            value: {
+              type: 'event',
+              event: { type: 'assistant/chunk', chunk: { type: 'text-delta', text: frameText } }
+            }
+          })
+          // ~8MB of SSE frames toward a phone that stopped reading.
+          for (let i = 0; i < 32; i++) peer.send(frame)
+        })
+      })
+    })
+    servers.push(harness)
+    await new Promise<void>((resolve) => harness.listen(0, '127.0.0.1', resolve))
+    const harnessPort = (harness.address() as AddressInfo).port
+    const bridge = new LanMobileBridge({
+      harnessUrl: () => `http://127.0.0.1:${harnessPort}`
+    })
+    bridges.push(bridge)
+    const { port, cookie } = await pairBridge(bridge)
+
+    // A stalled phone: the SSE response is opened but never drained.
+    let clientResponse: IncomingMessage | undefined
+    const drained = new Promise<number>((resolve, reject) => {
+      const request = httpRequest(
+        {
+          host: '127.0.0.1',
+          port,
+          path: '/api/session/stream?sessionId=session-bp',
+          headers: { cookie }
+        },
+        (response) => {
+          clientResponse = response
+          response.pause()
+          let bytes = 0
+          response.on('data', (chunk: Buffer) => {
+            bytes += chunk.length
+          })
+          response.on('end', () => resolve(bytes))
+          response.on('error', reject)
+        }
+      )
+      request.on('error', reject)
+      request.end()
+    })
+
+    // The bridge cuts the stream, which closes the upstream mux socket.
+    await waitFor(async () => peerClosed, 5000)
+    clientResponse!.resume()
+    const received = await drained
+    const pushedBytes = 32 * (frameText.length + 128)
+    expect(received).toBeLessThan(pushedBytes)
+  })
+
+  it('threads supervised tunnel state changes into the snapshot with LAN fallback', async () => {
+    let fireState: ((state: TunnelRuntimeState) => void) | undefined
+    let tunnelStopped = false
+    // Mirror the committed supervisor contract: the instance's `url` getter is
+    // the state channel (live URL while connected, undefined while down).
+    let instanceUrl: string | undefined = 'https://first.trycloudflare.com'
+    const bridge = new LanMobileBridge({
+      harnessUrl: () => 'http://127.0.0.1:9999',
+      createCloudflareTunnel: async (_port, hooks) => {
+        fireState = hooks.onStateChange
+        return {
+          provider: 'cloudflare',
+          get url() {
+            return instanceUrl
+          },
+          process: {},
+          stop: async () => {
+            tunnelStopped = true
+          }
+        } as InternetTunnelInstance
+      }
+    })
+    bridges.push(bridge)
+    await bridge.start()
+    await bridge.toggleTunnel(true)
+    expect(bridge.snapshot().tunnelActive).toBe(true)
+
+    // The tunnel child dies: the snapshot flips to down, the error surfaces,
+    // and no dead URL is advertised (pairing falls back to the LAN address).
+    instanceUrl = undefined
+    fireState!({
+      provider: 'cloudflare',
+      active: false,
+      error: 'cloudflare tunnel process exited unexpectedly (code 1)'
+    })
+    const down = bridge.snapshot()
+    expect(down.tunnelActive).toBe(false)
+    expect(down.tunnelError).toContain('exited unexpectedly')
+    expect(down.tunnelUrl).toBeUndefined()
+
+    // A relaunch recovers: active again, error cleared, replacement URL live.
+    instanceUrl = 'https://second.trycloudflare.com'
+    fireState!({
+      provider: 'cloudflare',
+      active: true,
+      url: 'https://second.trycloudflare.com'
+    })
+    const recovered = bridge.snapshot()
+    expect(recovered.tunnelActive).toBe(true)
+    expect(recovered.tunnelError).toBeUndefined()
+    expect(recovered.tunnelUrl).toBe('https://second.trycloudflare.com')
+
+    // After the host stops the tunnel, a late report from the replaced
+    // instance cannot resurrect its state in the snapshot.
+    await bridge.toggleTunnel(false)
+    expect(tunnelStopped).toBe(true)
+    fireState!({
+      provider: 'cloudflare',
+      active: true,
+      url: 'https://zombie.trycloudflare.com'
+    })
+    const afterStop = bridge.snapshot()
+    expect(afterStop.tunnelActive).toBe(false)
+    expect(afterStop.tunnelUrl).toBeUndefined()
   })
 })
 

@@ -13,7 +13,8 @@ import {
 import {
   startTunnelWithFallback,
   type InternetTunnelInstance,
-  type InternetTunnelProvider
+  type InternetTunnelProvider,
+  type TunnelRuntimeState
 } from './internet-tunnel'
 import { startPinggyTunnel } from './pinggy-tunnel'
 import {
@@ -27,6 +28,22 @@ const MAX_BODY_BYTES = 64 * 1024
 const PAIRING_TTL_MS = 5 * 60 * 1000
 const MUX_RECONNECT_MS = 500
 const MUX_RECONNECT_CAP_MS = 30_000
+/**
+ * F2: a burst of phone polls reuses one `session/list` serialization and one
+ * built history page for this long; any mutation, session-stream open, or mux
+ * drop clears it immediately.
+ */
+const SESSION_CACHE_TTL_MS = 750
+/** F2: the per-session history cache holds a page per open session, not a dump. */
+const SESSION_CACHE_MAX_ENTRIES = 8
+/**
+ * F5: buffered-but-undrained SSE bytes tolerated toward a stalled phone before
+ * the stream is cut. The page's EventSource reconnects on close (`retry: 500`),
+ * so ending the response drops the stream, never the client.
+ */
+const SSE_MAX_BUFFERED_BYTES = 2 * 1024 * 1024
+/** F11: pairing requests are bounded; expired first, then oldest evicted. */
+const MAX_PENDING_PAIRINGS = 16
 
 /** Gateway stream carrier: one WebSocket multiplexing every logical stream. */
 const REMOTE_STREAM_MUX_PATH = '/api/remote.mux'
@@ -83,6 +100,15 @@ const HARNESS_ENDPOINTS: Record<
 
 const RPC_ALLOWLIST = new Set([...Object.keys(HARNESS_ENDPOINTS), 'session.history', 'workspace.list'])
 
+/** F2: methods whose success invalidates the session-list/history caches. */
+const MUTATING_METHODS = new Set(['session.prompt', 'session.cancel', 'session.create'])
+
+/** Lifecycle hooks a tunnel starter receives from the bridge. */
+export interface TunnelStateHooks {
+  /** F3 follow-up: supervised tunnel state (down/relaunch/recovered). */
+  onStateChange(state: TunnelRuntimeState): void
+}
+
 export interface LanMobileBridgeOptions {
   harnessUrl(): string | undefined
   /** Per-process Harness launch token, traded once for a session cookie. */
@@ -95,8 +121,8 @@ export interface LanMobileBridgeOptions {
   cloudflaredPath?: string
   pinggySshPath?: string
   forceCloudflareFailure?: boolean
-  createCloudflareTunnel?: (port: number) => Promise<InternetTunnelInstance>
-  createPinggyTunnel?: (port: number) => Promise<InternetTunnelInstance>
+  createCloudflareTunnel?: (port: number, hooks: TunnelStateHooks) => Promise<InternetTunnelInstance>
+  createPinggyTunnel?: (port: number, hooks: TunnelStateHooks) => Promise<InternetTunnelInstance>
   tunnelLog?: (message: string) => void
   now?: () => number
   onReconnectRequested?: () => void
@@ -173,6 +199,14 @@ export class LanMobileBridge {
   private readonly suspendedSessions = new Map<string, MobileSession>()
   private readonly pendingPairings = new Map<string, PendingPairing>()
   private readonly pendingQuestions = new Map<string, PendingMobileQuestion>()
+  /**
+   * F2: short-TTL reuse of the last `session/list` serialization and built
+   * history pages, so a burst of phone polls costs one Harness round-trip.
+   */
+  private readonly historyCache = new Map<string, { value: unknown; expiresAt: number }>()
+  private sessionListCache?: { value: unknown; expiresAt: number }
+  /** F6: the QR SVG only depends on the pairing URL; regenerate it per URL. */
+  private qrSvgCache?: { url: string; svg: string }
   /** Client generation id from the event stream's `ready` frame; results quote it. */
   private eventClientId?: string
   /** Latest `workspace/follow` baseline, standing in for the removed unary list. */
@@ -239,6 +273,8 @@ export class LanMobileBridge {
     this.suspendedSessions.clear()
     this.pendingPairings.clear()
     this.pendingQuestions.clear()
+    this.workspaceSnapshot = undefined
+    this.invalidateHistoryCache()
     for (const abort of this.sessionStreamAborts) abort.abort()
     this.sessionStreamAborts.clear()
     this.syncConnected()
@@ -351,29 +387,68 @@ export class LanMobileBridge {
     if (previous) await previous.stop().catch(() => undefined)
   }
 
+  /**
+   * Tunnel follow-up: spawn one tunnel and scope its lifecycle events. The
+   * supervisor's `url` already flips to `undefined` while the tunnel is down;
+   * `tunnelActive`/`tunnelError` are bridge-owned, so the state-change seam
+   * threads down/relaunch/recovered into the snapshot. Only the tunnel that
+   * is still `this.tunnelInstance` may update the snapshot — a tunnel replaced
+   * by a fallback, swap, or stop reporting late must not resurrect its state.
+   */
+  private async startSupervisedTunnel(
+    start: (hooks: TunnelStateHooks) => Promise<InternetTunnelInstance>
+  ): Promise<InternetTunnelInstance> {
+    let instance: InternetTunnelInstance | undefined
+    const started = await start({
+      onStateChange: (state) => {
+        if (instance !== undefined && this.tunnelInstance === instance) {
+          this.observeTunnelState(state)
+        }
+      }
+    })
+    instance = started
+    return started
+  }
+
+  /** The bridge-owned half of the tunnel lifecycle, mirrored from the seam. */
+  private observeTunnelState(state: TunnelRuntimeState): void {
+    this.tunnelActive = state.active
+    this.tunnelError = state.active ? undefined : (state.error ?? this.tunnelError)
+  }
+
   private async startCloudflareInstance(port: number): Promise<InternetTunnelInstance> {
-    if (this.options.createCloudflareTunnel) return this.options.createCloudflareTunnel(port)
+    if (this.options.createCloudflareTunnel) {
+      return this.startSupervisedTunnel((hooks) => this.options.createCloudflareTunnel!(port, hooks))
+    }
     const cacheDir = this.tunnelCacheDir()
     const binaryPath = await ensureCloudflaredBinary({
       cacheDir,
       customPath: this.options.cloudflaredPath
     })
-    return startCloudflareQuickTunnel({
-      port,
-      binaryPath,
-      log: this.options.tunnelLog
-    })
+    return this.startSupervisedTunnel((hooks) =>
+      startCloudflareQuickTunnel({
+        port,
+        binaryPath,
+        log: this.options.tunnelLog,
+        onStateChange: hooks.onStateChange
+      })
+    )
   }
 
   private async startPinggyInstance(port: number): Promise<InternetTunnelInstance> {
-    if (this.options.createPinggyTunnel) return this.options.createPinggyTunnel(port)
+    if (this.options.createPinggyTunnel) {
+      return this.startSupervisedTunnel((hooks) => this.options.createPinggyTunnel!(port, hooks))
+    }
     const cacheDir = this.tunnelCacheDir()
-    return startPinggyTunnel({
-      port,
-      sshPath: this.options.pinggySshPath,
-      knownHostsPath: join(cacheDir, 'pinggy-known-hosts'),
-      log: this.options.tunnelLog
-    })
+    return this.startSupervisedTunnel((hooks) =>
+      startPinggyTunnel({
+        port,
+        sshPath: this.options.pinggySshPath,
+        knownHostsPath: join(cacheDir, 'pinggy-known-hosts'),
+        log: this.options.tunnelLog,
+        onStateChange: hooks.onStateChange
+      })
+    )
   }
 
   private tunnelCacheDir(): string {
@@ -405,7 +480,9 @@ export class LanMobileBridge {
       desktopUrl: `http://127.0.0.1:${this.port}/desktop`,
       tunnelActive: this.tunnelActive,
       tunnelLoading: this.tunnelLoading,
-      tunnelUrl: this.tunnelInstance?.url,
+      // While the tunnel is down (relaunch pending or given up) no URL may be
+      // advertised, even if an instance implementation forgets to flip its own.
+      tunnelUrl: this.tunnelActive ? this.tunnelInstance?.url : undefined,
       tunnelProvider: this.tunnelInstance?.provider,
       tunnelError: this.tunnelError
     }
@@ -418,6 +495,18 @@ export class LanMobileBridge {
 
   private pairingTokenValid(): boolean {
     return Boolean(this.pairingToken && this.pairingExpiresAt && this.pairingExpiresAt >= this.now())
+  }
+
+  /**
+   * F6: the desktop pairing surface re-rendered the QR SVG on every response —
+   * page load, each toggle/fallback, and any status poll. The SVG only depends
+   * on the pairing URL, so it is regenerated per URL, not per request.
+   */
+  private async qrSvg(pairingUrl: string): Promise<string> {
+    if (this.qrSvgCache?.url === pairingUrl) return this.qrSvgCache.svg
+    const svg = await QRCode.toString(pairingUrl, { type: 'svg', margin: 1, width: 260 })
+    this.qrSvgCache = { url: pairingUrl, svg }
+    return svg
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -485,7 +574,7 @@ export class LanMobileBridge {
       }
       const snapshot = this.snapshot()
       if (!snapshot.pairingUrl || !snapshot.expiresAt) return this.text(response, 503, 'Bridge unavailable.')
-      const qrSvg = await QRCode.toString(snapshot.pairingUrl, { type: 'svg', margin: 1, width: 260 })
+      const qrSvg = await this.qrSvg(snapshot.pairingUrl)
       return this.html(
         response,
         renderDesktopPairingPage({
@@ -524,7 +613,7 @@ export class LanMobileBridge {
       if (!isLoopbackAddress(remoteAddress)) return this.text(response, 403, 'Desktop only.')
       const snapshot = this.snapshot()
       const qrSvg = snapshot.pairingUrl
-        ? await QRCode.toString(snapshot.pairingUrl, { type: 'svg', margin: 1, width: 260 })
+        ? await this.qrSvg(snapshot.pairingUrl)
         : undefined
       return this.json(response, 200, {
         active: snapshot.tunnelActive,
@@ -561,7 +650,7 @@ export class LanMobileBridge {
       }
       const snapshot = await this.fallbackToPinggy()
       const qrSvg = snapshot.pairingUrl
-        ? await QRCode.toString(snapshot.pairingUrl, { type: 'svg', margin: 1, width: 260 })
+        ? await this.qrSvg(snapshot.pairingUrl)
         : undefined
       return this.json(response, 200, {
         ok: !snapshot.tunnelError,
@@ -603,7 +692,7 @@ export class LanMobileBridge {
       }
       const snapshot = await this.toggleTunnel(enable)
       const qrSvg = snapshot.pairingUrl
-        ? await QRCode.toString(snapshot.pairingUrl, { type: 'svg', margin: 1, width: 260 })
+        ? await this.qrSvg(snapshot.pairingUrl)
         : undefined
       return this.json(response, 200, {
         ok: !snapshot.tunnelError,
@@ -673,14 +762,13 @@ export class LanMobileBridge {
       if (!this.validPairingToken(url.searchParams.get('token'))) {
         return this.text(response, 401, 'This pairing link is invalid or expired.')
       }
-      const id = randomUUID()
-      this.pendingPairings.set(id, {
-        id,
+      const pending = this.rememberPendingPairing({
+        id: randomUUID(),
         remoteAddress,
         mode: connectionMode,
         expiresAt: this.pairingExpiresAt!
       })
-      return this.html(response, renderPairingWaitPage(id, this.locale()))
+      return this.html(response, renderPairingWaitPage(pending.id, this.locale()))
     }
 
     if (request.method === 'GET' && url.pathname === '/pair/status') {
@@ -731,6 +819,9 @@ export class LanMobileBridge {
       this.verifyTrustedOrigin(request)
       const sessionId = url.searchParams.get('sessionId')
       if (!sessionId) return this.text(response, 400, 'Session id is required.')
+      // Opening (or reopening) a session stream is a session switch: cached
+      // history pages predate the fresh snapshot the stream is about to send.
+      this.invalidateHistoryCache()
       return this.streamSession(request, response, sessionId)
     }
     if (request.method === 'POST' && url.pathname === '/api/rpc') {
@@ -751,6 +842,8 @@ export class LanMobileBridge {
           kind: 'result',
           value: { answers: answer.answers }
         })
+        // Settling a question lets the turn proceed: cached pages are stale.
+        if (result.ok) this.invalidateHistoryCache()
         return this.json(response, result.ok ? 200 : 400, result)
       }
       if (input.method === 'interaction.cancel') {
@@ -765,6 +858,7 @@ export class LanMobileBridge {
             code: 'cancelled'
           }
         })
+        if (result.ok) this.invalidateHistoryCache()
         return this.json(response, result.ok ? 200 : 400, result)
       }
       if (typeof input.method !== 'string' || !RPC_ALLOWLIST.has(input.method)) {
@@ -801,11 +895,28 @@ export class LanMobileBridge {
         item.expiresAt >= this.now()
     )
     if (current) return current
-    const pending = {
+    return this.rememberPendingPairing({
       id: randomUUID(),
       remoteAddress,
       mode,
       expiresAt: this.now() + PAIRING_TTL_MS
+    })
+  }
+
+  /**
+   * F11: `pendingPairings` used to grow without bound — every `/pair` scan or
+   * `/reconnect` retry inserted an entry and only explicit reads removed them.
+   * Expired entries are purged on insert, and the oldest are evicted once the
+   * cap is reached (insertion order is oldest-first).
+   */
+  private rememberPendingPairing(pending: PendingPairing): PendingPairing {
+    for (const [id, item] of this.pendingPairings) {
+      if (item.expiresAt < this.now()) this.pendingPairings.delete(id)
+    }
+    while (this.pendingPairings.size >= MAX_PENDING_PAIRINGS) {
+      const oldest = this.pendingPairings.keys().next().value
+      if (oldest === undefined) break
+      this.pendingPairings.delete(oldest)
     }
     this.pendingPairings.set(pending.id, pending)
     return pending
@@ -957,7 +1068,13 @@ export class LanMobileBridge {
 
     if (method === 'session.history') {
       const sessionId = fields.sessionId
-      const listed = await this.invokeHarness('session/list', { _request: {} })
+      // F2: the phone reconciles its SSE view by re-reading history on a
+      // ladder that used to bottom out at 250ms; a short-TTL cache turns a
+      // burst of those polls into at most one serialization + page fetch.
+      const cacheKey = `${String(sessionId)}:${typeof fields.maxMessages === 'number' ? fields.maxMessages : ''}`
+      const cached = this.historyCache.get(cacheKey)
+      if (cached && cached.expiresAt > this.now()) return { ok: true, value: cached.value }
+      const listed = await this.harnessSessionList()
       if (!listed.ok) return listed
       const items = (listed.value as {
         items?: {
@@ -977,26 +1094,46 @@ export class LanMobileBridge {
         }
       })
       if (!page.ok) return page
-      const value = page.value as { records?: unknown; hasMore?: unknown }
-      if (!Array.isArray(value?.records)) {
+      const pageValue = page.value as { records?: unknown; hasMore?: unknown }
+      if (!Array.isArray(pageValue?.records)) {
         return { ok: false, error: 'Harness returned invalid session history.' }
       }
       // Harness 0.1.2 calls the durable entries `records` and serves
       // projections on the list row. Keep the stable mobile-page contract so
       // cached pages can still render messages, running state, and todos.
-      return {
-        ok: true,
-        value: {
-          events: value.records,
-          projections,
-          hasMore: value.hasMore === true
-        }
+      const value = {
+        events: pageValue.records,
+        projections,
+        hasMore: pageValue.hasMore === true
       }
+      if (this.historyCache.size >= SESSION_CACHE_MAX_ENTRIES) this.historyCache.clear()
+      this.historyCache.set(cacheKey, { value, expiresAt: this.now() + SESSION_CACHE_TTL_MS })
+      return { ok: true, value }
     }
+
+    if (method === 'session.list') return this.harnessSessionList()
 
     const route = HARNESS_ENDPOINTS[method]
     if (route === undefined) return { ok: false, error: 'RPC method is not available on mobile.' }
-    return this.invokeHarness(route.endpoint, route.args(fields))
+    const result = await this.invokeHarness(route.endpoint, route.args(fields))
+    // F2: anything that changes session state must not be observed through a
+    // cached list or history page.
+    if (result.ok && MUTATING_METHODS.has(method)) this.invalidateHistoryCache()
+    return result
+  }
+
+  /**
+   * F2: one serialization of the Host's session list, reused for a short TTL
+   * by both `session.list` RPCs and the history read's cursor lookup.
+   */
+  private async harnessSessionList(): Promise<{ ok: boolean; value?: unknown; error?: string }> {
+    const cached = this.sessionListCache
+    if (cached && cached.expiresAt > this.now()) return { ok: true, value: cached.value }
+    const listed = await this.invokeHarness('session/list', { _request: {} })
+    if (listed.ok) {
+      this.sessionListCache = { value: listed.value, expiresAt: this.now() + SESSION_CACHE_TTL_MS }
+    }
+    return listed
   }
 
   private async invokeHarness(
@@ -1034,7 +1171,12 @@ export class LanMobileBridge {
   private syncConnected(): void {
     const connected = this.sessions.size > 0
     if (connected) this.startMuxMonitor()
-    else this.muxAbort?.abort()
+    else if (this.muxAbort) {
+      this.muxAbort.abort()
+      // F12: a workspace baseline (and any cached pages) observed by a carrier
+      // that is being torn down must not answer later polls.
+      this.invalidateMuxState()
+    }
     if (connected === this.lastConnected) return
     this.lastConnected = connected
     // Reconciliation runs off the request path, so a throwing observer must not
@@ -1044,6 +1186,21 @@ export class LanMobileBridge {
     } catch {
       // A renderer that went away mid-broadcast is not the bridge's problem.
     }
+  }
+
+  /**
+   * F12: drop everything a dead or aborted mux carrier had delivered, so the
+   * next poll rebuilds instead of answering from a stale workspace baseline.
+   */
+  private invalidateMuxState(): void {
+    this.workspaceSnapshot = undefined
+    this.invalidateHistoryCache()
+  }
+
+  /** F2: cached session-list serializations and built history pages are dropped. */
+  private invalidateHistoryCache(): void {
+    this.historyCache.clear()
+    this.sessionListCache = undefined
   }
 
   private startMuxMonitor(): void {
@@ -1078,6 +1235,9 @@ export class LanMobileBridge {
       }
       if (base !== lastBase) {
         this.pendingQuestions.clear()
+        // The new Harness owns different data: drop everything the previous
+        // carrier delivered instead of answering from its stale baseline.
+        this.invalidateMuxState()
         lastBase = base
         backoffMs = MUX_RECONNECT_MS
       }
@@ -1090,6 +1250,9 @@ export class LanMobileBridge {
       } catch {
         if (signal.aborted) return
         this.pendingQuestions.clear()
+        // Only a carrier that had actually delivered data leaves stale state
+        // behind; a failed handshake has nothing to invalidate.
+        if (openedAt !== undefined) this.invalidateMuxState()
         // A connection that held for a while and then dropped is a transient
         // fault, not a Harness that refuses the downlink: retry promptly.
         if (openedAt !== undefined && this.now() - openedAt >= MUX_STABLE_MS) {
@@ -1253,7 +1416,12 @@ export class LanMobileBridge {
         if (frame.type === 'item') {
           const value = frame.value
           const eventName = isRecord(value) && value.type === 'snapshot' ? 'snapshot' : 'event'
-          response.write(`event: ${eventName}\ndata: ${JSON.stringify(value)}\n\n`)
+          // F5: a stalled phone used to leave the bridge buffering frames
+          // without bound. Once the socket stops draining past the cap, end
+          // the SSE response — the page's EventSource reconnects on close.
+          if (!response.write(`event: ${eventName}\ndata: ${JSON.stringify(value)}\n\n`)) {
+            if (response.writableLength > SSE_MAX_BUFFERED_BYTES) finish()
+          }
         } else if (frame.type === 'error' || frame.type === 'end') {
           finish()
         }

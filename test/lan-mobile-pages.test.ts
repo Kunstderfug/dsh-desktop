@@ -97,9 +97,12 @@ describe('LAN mobile page', () => {
     expect(html).toContain("optimisticPrompts=optimisticPrompts.filter(item=>(counts.get(item.text)||0)<item.targetCount)")
     expect(html).toContain('class=\"skeleton\"')
     expect(html).toContain(
-      'const delay=streamConnected?HISTORY_POLL_IDLE_CAP_MS:agentRunning||pendingQuestion?HISTORY_POLL_ACTIVE_MS:idlePollMs'
+      'const delay=streamConnected?HISTORY_POLL_RECONCILE_MS:agentRunning||pendingQuestion?HISTORY_POLL_ACTIVE_MS:idlePollMs'
     )
     expect(html).toContain('HISTORY_POLL_ACTIVE_MS=250,HISTORY_POLL_IDLE_MS=750')
+    // F2: while the SSE stream is healthy it carries the changes itself, so
+    // polling only reconciles at a slow fixed cadence.
+    expect(html).toContain('HISTORY_POLL_RECONCILE_MS=15000')
     // An idle chat left open must not keep refetching the whole history forever.
     expect(html).toContain('if(!activeSession||document.hidden)return')
     expect(html).toContain(
@@ -160,7 +163,15 @@ describe('LAN mobile page', () => {
     expect(html).not.toContain('Connected on local network')
     expect(html).toContain("fetch('/api/status',{cache:'no-store'})")
     expect(html).toContain("location.replace('/disconnected')")
-    expect(html).toContain('setInterval(checkConnection,1500)')
+    // F1: the status poll starts fast (initial connect/pairing) and falls back
+    // to a 30s keep-alive; recent SSE frames prove liveness and skip the poll.
+    expect(html).toContain('STATUS_POLL_FAST_MS=1500,STATUS_POLL_KEEPALIVE_MS=30000,STATUS_POLL_SSE_PROOF_MS=25000')
+    expect(html).toContain('function scheduleStatusPoll()')
+    expect(html).toContain('streamConnected&&lastStreamActivityAt&&Date.now()-lastStreamActivityAt<STATUS_POLL_SSE_PROOF_MS')
+    expect(html).toContain('statusPollMs=STATUS_POLL_KEEPALIVE_MS')
+    expect(html).toContain('statusPollMs=STATUS_POLL_FAST_MS;void checkConnection()')
+    expect(html).toContain('lastStreamActivityAt=Date.now()')
+    expect(html).not.toContain('setInterval(checkConnection')
     expect(html).toContain("status.classList.add('error-state')")
     expect(html).toContain("if(r.status===401)")
     expect(html).toContain('e.disconnected=true')
@@ -248,6 +259,9 @@ describe('LAN mobile page', () => {
     expect(desktop).not.toContain('animation:tunnelProgress')
     expect(desktop).not.toContain('<div class="spinner">')
     expect(desktop).toContain('id="qrCode"><svg></svg></div>')
+    // F6: the QR re-renders only when the pairing payload actually changed.
+    expect(desktop).toContain("if(j.qrSvg&&qrChanged)document.getElementById('qrCode').innerHTML=j.qrSvg")
+    expect(desktop).toContain('const qrChanged=j.pairingUrl!==pairingUrl')
     expect(desktop).toContain("document.getElementById('qrCode').innerHTML=j.qrSvg")
     expect(desktop).not.toContain("document.getElementById('qrContainer').innerHTML=j.qrSvg")
     expect(desktop).toContain('if(phoneConnected||modeSwitching)return')
@@ -671,13 +685,19 @@ describe('desktop pairing page QR expiry self-healing', () => {
       tunnelUrl: undefined,
       tunnelError: undefined
     })
-    const countdown = /setInterval\(\(\)=>\{const n=[\s\S]*?\},1000\)/.exec(html)?.[0]
+    const countdown = /setInterval\(\(\)=>\{const n=[\s\S]*?\},800\)/.exec(html)?.[0]
     expect(countdown).toBeTruthy()
     expect(countdown).toContain('T.expired')
     expect(countdown).toContain('location.reload()')
     expect(countdown).toContain('phoneConnected')
     expect(countdown).toContain('pendingId')
     expect(countdown).toContain('modeSwitching')
+    expect(countdown).toContain('poll()')
+    // F6: the pairing window coalesced its countdown timer and its
+    // pending/status double-poll into this single interval (the only other
+    // interval on the page is the progress-bar animation).
+    expect(html).not.toContain('setInterval(poll,800)')
+    expect(html).not.toContain('},1000)')
   })
 })
 
