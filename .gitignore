@@ -23,3 +23,7 @@ __pycache__/
 
 # Native recovery UI smoke-test output
 /artifacts/recovery-ui/
+
+# Native shell (Swift/WKWebView prototype) build output
+/native-shell/build/
+/native-shell/.build/
