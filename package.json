@@ -402,12 +402,11 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "target": [
-        "dmg",
-        "zip"
+        "dmg"
       ]
     },
     "dmg": {
-      "format": "UDBZ"
+      "format": "ULMO"
     },
     "win": {
       "icon": "build/icon.ico",
