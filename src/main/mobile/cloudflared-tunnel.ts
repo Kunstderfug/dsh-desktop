@@ -8,6 +8,14 @@ import { arch, platform } from 'node:os'
 import { pipeline } from 'node:stream/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import {
+  superviseTunnel,
+  watchPostConnectExit,
+  type TunnelChildProcess,
+  type TunnelExitDetail,
+  type TunnelRuntimeState,
+  type TunnelSupervisor
+} from './internet-tunnel'
 import type { InternetTunnelInstance } from './internet-tunnel'
 
 const execFileAsync = promisify(execFile)
@@ -90,6 +98,11 @@ export async function sha256OfFile(path: string): Promise<string> {
 export async function ensureCloudflaredBinary(options: {
   cacheDir: string
   customPath?: string
+  /**
+   * F7: version key for the cache. Defaults to the pinned version; passing a
+   * different value re-downloads instead of reusing a stale binary.
+   */
+  version?: string
   osPlatform?: NodeJS.Platform | string
   osArch?: NodeJS.Architecture | string
   download?: (url: string, destination: string) => Promise<void>
@@ -108,22 +121,27 @@ export async function ensureCloudflaredBinary(options: {
     throw new Error(`Unsupported platform/architecture for cloudflared: ${options.osPlatform ?? platform()}-${options.osArch ?? arch()}`)
   }
 
+  const version = options.version ?? CLOUDFLARED_VERSION
   const binaryName = (options.osPlatform ?? platform()) === 'win32' ? 'cloudflared.exe' : 'cloudflared'
-  const targetBinaryPath = join(options.cacheDir, binaryName)
+  // F7: the cache is keyed by the version being downloaded, so a version bump
+  // re-downloads instead of silently reusing a stale binary, while the file
+  // itself is reused untouched while the version stays the same.
+  const versionDir = join(options.cacheDir, version)
+  const targetBinaryPath = join(versionDir, binaryName)
   if (existsSync(targetBinaryPath)) {
     return targetBinaryPath
   }
 
-  await mkdir(options.cacheDir, { recursive: true })
+  await mkdir(versionDir, { recursive: true })
   // Sweep leftovers of downloads interrupted before verification could run;
   // they are never reused and would otherwise accumulate on every crash.
-  for (const entry of await readdir(options.cacheDir)) {
+  for (const entry of await readdir(versionDir)) {
     if (entry.startsWith('.download-')) {
-      await rm(join(options.cacheDir, entry), { force: true }).catch(() => undefined)
+      await rm(join(versionDir, entry), { force: true }).catch(() => undefined)
     }
   }
-  const downloadUrl = `https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/${target.spec.asset}`
-  const tempDownloadPath = join(options.cacheDir, `.download-${Date.now()}-${target.spec.asset}`)
+  const downloadUrl = `https://github.com/cloudflare/cloudflared/releases/download/${version}/${target.spec.asset}`
+  const tempDownloadPath = join(versionDir, `.download-${Date.now()}-${target.spec.asset}`)
 
   try {
     const download = options.download ?? downloadCloudflaredWithRetry
@@ -138,7 +156,7 @@ export async function ensureCloudflaredBinary(options: {
     }
 
     if (target.spec.isTarGz) {
-      await execFileAsync('tar', ['-xzf', tempDownloadPath, '-C', options.cacheDir])
+      await execFileAsync('tar', ['-xzf', tempDownloadPath, '-C', versionDir])
       await rm(tempDownloadPath, { force: true }).catch(() => undefined)
     } else {
       await rm(targetBinaryPath, { force: true }).catch(() => undefined)
@@ -266,20 +284,74 @@ export function terminateChildProcess(
   }, graceMs).unref?.()
 }
 
-export async function startCloudflareQuickTunnel(options: {
+export interface CloudflareQuickTunnelOptions {
   port: number
   binaryPath: string
   timeoutMs?: number
   log?: (message: string) => void
-}): Promise<CloudflareTunnelInstance> {
+  /** F3: observe an unexpected child death after a successful connect. */
+  onUnexpectedExit?: (detail: TunnelExitDetail) => void
+  /** Lifecycle state of the supervised tunnel (up/down/reconnects). */
+  onStateChange?: (state: TunnelRuntimeState) => void
+  /** Injectable child-process seam: tests pass fakes, never real cloudflared. */
+  spawnProcess?: (command: string, args: string[]) => TunnelChildProcess
+  /** Injectable relaunch backoff wait (tests pass a controlled one). */
+  delay?: (ms: number) => Promise<void>
+  relaunchStartMs?: number
+  relaunchMaxMs?: number
+  maxRelaunchAttempts?: number
+}
+
+/**
+ * Start a Cloudflare Quick Tunnel that survives unexpected child deaths.
+ *
+ * The public starter supervises the connected child (F3): an unexpected
+ * exit flips the instance to down and relaunches single-flight with
+ * exponential backoff, while `url` on the returned instance always reflects
+ * the live tunnel. Only the first successful connect is awaited; relaunches
+ * happen in the background. Host-initiated stops never relaunch.
+ */
+export async function startCloudflareQuickTunnel(
+  options: CloudflareQuickTunnelOptions
+): Promise<CloudflareTunnelInstance> {
+  let supervisor: TunnelSupervisor | undefined
+  const spawnOnce = (): Promise<CloudflareTunnelInstance> =>
+    startCloudflareQuickTunnelOnce({
+      ...options,
+      onUnexpectedExit: (detail) => supervisor?.handleUnexpectedExit(detail)
+    })
+  const initial = await spawnOnce()
+  supervisor = superviseTunnel({
+    provider: 'cloudflare',
+    initial,
+    start: spawnOnce,
+    log: options.log,
+    onStateChange: options.onStateChange,
+    delay: options.delay,
+    relaunchStartMs: options.relaunchStartMs,
+    relaunchMaxMs: options.relaunchMaxMs,
+    maxRelaunchAttempts: options.maxRelaunchAttempts
+  })
+  return supervisor.instance as CloudflareTunnelInstance
+}
+
+async function startCloudflareQuickTunnelOnce(
+  options: CloudflareQuickTunnelOptions
+): Promise<CloudflareTunnelInstance> {
   const { port, binaryPath, timeoutMs = 30_000, log } = options
+
+  const spawnChild =
+    options.spawnProcess ??
+    ((command: string, args: string[]) =>
+      spawn(command, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      }))
 
   return new Promise((resolvePromise, rejectPromise) => {
     let resolved = false
-    const child = spawn(binaryPath, ['tunnel', '--url', `http://127.0.0.1:${port}`], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true
-    })
+    let stoppedByHost = false
+    const child = spawnChild(binaryPath, ['tunnel', '--url', `http://127.0.0.1:${port}`])
 
     const timeoutTimer = setTimeout(() => {
       if (!resolved) {
@@ -298,11 +370,18 @@ export async function startCloudflareQuickTunnel(options: {
         log?.(`[cloudflared] Tunnel online: ${capturedUrl}`)
         resolved = true
         clearTimeout(timeoutTimer)
+        // F3: a post-connect exit used to be ignored here — the desktop kept
+        // advertising the dead URL. The supervisor watches from now on.
+        watchPostConnectExit(child, {
+          isHostStopped: () => stoppedByHost,
+          onUnexpectedExit: (detail) => options.onUnexpectedExit?.(detail)
+        })
         resolvePromise({
           provider: 'cloudflare',
           url: capturedUrl,
           process: child,
           stop: async () => {
+            stoppedByHost = true
             cleanup()
           }
         })

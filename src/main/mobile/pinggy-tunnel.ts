@@ -4,6 +4,14 @@ import { mkdir } from 'node:fs/promises'
 import { arch, platform } from 'node:os'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
+import {
+  superviseTunnel,
+  watchPostConnectExit,
+  type TunnelChildProcess,
+  type TunnelExitDetail,
+  type TunnelRuntimeState,
+  type TunnelSupervisor
+} from './internet-tunnel'
 import type { InternetTunnelInstance } from './internet-tunnel'
 
 const execFileAsync = promisify(execFile)
@@ -102,7 +110,7 @@ function resolveSshKeygen(sshPath?: string): string {
   return 'ssh-keygen'
 }
 
-export async function startPinggyTunnel(options: {
+export interface PinggyTunnelOptions {
   port: number
   knownHostsPath: string
   sshPath?: string
@@ -110,7 +118,51 @@ export async function startPinggyTunnel(options: {
   createIdentity?: (identityPath: string) => Promise<void>
   timeoutMs?: number
   log?: (message: string) => void
-}): Promise<PinggyTunnelInstance> {
+  /** F3: observe an unexpected child death after a successful connect. */
+  onUnexpectedExit?: (detail: TunnelExitDetail) => void
+  /** Lifecycle state of the supervised tunnel (up/down/reconnects). */
+  onStateChange?: (state: TunnelRuntimeState) => void
+  /** Injectable child-process seam: tests pass fakes, never a real ssh client. */
+  spawnProcess?: (command: string, args: string[]) => TunnelChildProcess
+  /** Injectable relaunch backoff wait (tests pass a controlled one). */
+  delay?: (ms: number) => Promise<void>
+  relaunchStartMs?: number
+  relaunchMaxMs?: number
+  maxRelaunchAttempts?: number
+}
+
+/**
+ * Start a Pinggy tunnel that survives unexpected child deaths.
+ *
+ * The public starter supervises the connected ssh child (F3): an unexpected
+ * exit flips the instance to down and relaunches single-flight with
+ * exponential backoff, while `url` on the returned instance always reflects
+ * the live tunnel. Only the first successful connect is awaited; relaunches
+ * happen in the background. Host-initiated stops never relaunch.
+ */
+export async function startPinggyTunnel(options: PinggyTunnelOptions): Promise<PinggyTunnelInstance> {
+  let supervisor: TunnelSupervisor | undefined
+  const spawnOnce = (): Promise<PinggyTunnelInstance> =>
+    startPinggyTunnelOnce({
+      ...options,
+      onUnexpectedExit: (detail) => supervisor?.handleUnexpectedExit(detail)
+    })
+  const initial = await spawnOnce()
+  supervisor = superviseTunnel({
+    provider: 'pinggy',
+    initial,
+    start: spawnOnce,
+    log: options.log,
+    onStateChange: options.onStateChange,
+    delay: options.delay,
+    relaunchStartMs: options.relaunchStartMs,
+    relaunchMaxMs: options.relaunchMaxMs,
+    maxRelaunchAttempts: options.maxRelaunchAttempts
+  })
+  return supervisor.instance as PinggyTunnelInstance
+}
+
+async function startPinggyTunnelOnce(options: PinggyTunnelOptions): Promise<PinggyTunnelInstance> {
   const { port, knownHostsPath, timeoutMs = 30_000, log } = options
   const sshPath = options.sshPath ?? (await findSshOnPath())
   if (!sshPath) {
@@ -125,17 +177,19 @@ export async function startPinggyTunnel(options: {
     createIdentity: options.createIdentity
   })
 
-  return new Promise((resolvePromise, rejectPromise) => {
-    let settled = false
-    let output = ''
-    const child = spawn(
-      sshPath,
-      buildPinggySshArgs({ port, knownHostsPath, identityPath }),
-      {
+  const spawnChild =
+    options.spawnProcess ??
+    ((command: string, args: string[]) =>
+      spawn(command, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true
-      }
-    )
+      }))
+
+  return new Promise((resolvePromise, rejectPromise) => {
+    let settled = false
+    let stoppedByHost = false
+    let output = ''
+    const child = spawnChild(sshPath, buildPinggySshArgs({ port, knownHostsPath, identityPath }))
 
     const cleanup = () => {
       try {
@@ -172,11 +226,20 @@ export async function startPinggyTunnel(options: {
       settled = true
       clearTimeout(timeoutTimer)
       log?.(`[pinggy] Tunnel online: ${capturedUrl}`)
+      // F3: a post-connect exit used to be ignored here — the desktop kept
+      // advertising the dead URL. The supervisor watches from now on.
+      watchPostConnectExit(child, {
+        isHostStopped: () => stoppedByHost,
+        onUnexpectedExit: (detail) => options.onUnexpectedExit?.(detail)
+      })
       resolvePromise({
         provider: 'pinggy',
         url: capturedUrl,
         process: child,
-        stop: async () => cleanup()
+        stop: async () => {
+          stoppedByHost = true
+          cleanup()
+        }
       })
     }
 

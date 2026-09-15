@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
+import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
@@ -17,20 +18,33 @@ import {
   isRetryableDownloadError,
   resolveCurrentAssetSpec,
   sha256OfFile,
-  terminateChildProcess
+  startCloudflareQuickTunnel,
+  terminateChildProcess,
+  type CloudflareQuickTunnelOptions
 } from '../src/main/mobile/cloudflared-tunnel'
-import {
-  startTunnelWithFallback,
-  type InternetTunnelInstance
-} from '../src/main/mobile/internet-tunnel'
 import {
   buildPinggySshArgs,
   ensurePinggyIdentity,
   extractPinggyUrl,
   PINGGY_HOST,
   PINGGY_USER,
-  pinggyIdentityPath
+  pinggyIdentityPath,
+  startPinggyTunnel,
+  type PinggyTunnelOptions
 } from '../src/main/mobile/pinggy-tunnel'
+import {
+  startTunnelWithFallback,
+  superviseTunnel,
+  tunnelRelaunchDelayMs,
+  TUNNEL_RELAUNCH_MAX_ATTEMPTS,
+  TUNNEL_RELAUNCH_MAX_MS,
+  TUNNEL_RELAUNCH_START_MS,
+  watchPostConnectExit,
+  type InternetTunnelInstance,
+  type TunnelChildProcess,
+  type TunnelExitDetail,
+  type TunnelRuntimeState
+} from '../src/main/mobile/internet-tunnel'
 
 const bridges: LanMobileBridge[] = []
 const harnessServers: ReturnType<typeof createServer>[] = []
@@ -458,7 +472,7 @@ describe('cloudflared download integrity', () => {
         findOnPath: async () => null
       })
     ).rejects.toThrow(/checksum mismatch/i)
-    expect(await readdir(dir)).toEqual([])
+    expect(await readdir(join(dir, CLOUDFLARED_VERSION))).toEqual([])
   })
 
   it('accepts a download whose checksum matches the pinned spec', async () => {
@@ -477,7 +491,7 @@ describe('cloudflared download integrity', () => {
         },
         findOnPath: async () => null
       })
-      expect(binaryPath).toBe(join(dir, 'cloudflared'))
+      expect(binaryPath).toBe(join(dir, CLOUDFLARED_VERSION, 'cloudflared'))
       expect(existsSync(binaryPath)).toBe(true)
     } finally {
       spec.sha256 = originalSha
@@ -524,7 +538,9 @@ describe('cloudflared download integrity', () => {
 
   it('sweeps leftover .download-* files from interrupted runs', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-tunnel-'))
-    await writeFile(join(dir, '.download-1700000000000-cloudflared-linux-amd64'), 'partial')
+    const versionDir = join(dir, CLOUDFLARED_VERSION)
+    await mkdir(versionDir, { recursive: true })
+    await writeFile(join(versionDir, '.download-1700000000000-cloudflared-linux-amd64'), 'partial')
     const spec = CLOUDFLARED_ASSETS['linux-x64']!
     const originalSha = spec.sha256
     const payload = Buffer.from('fresh genuine bytes')
@@ -539,7 +555,7 @@ describe('cloudflared download integrity', () => {
         },
         findOnPath: async () => null
       })
-      const leftovers = (await readdir(dir)).filter((name) => name.startsWith('.download-'))
+      const leftovers = (await readdir(versionDir)).filter((name) => name.startsWith('.download-'))
       expect(leftovers).toEqual([])
     } finally {
       spec.sha256 = originalSha
@@ -766,5 +782,482 @@ describe('LanMobileBridge shutdown with live connections', () => {
       new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 3_000))
     ])
     expect(winner).toBe('stopped')
+  })
+})
+
+interface DeferredGate {
+  resolve: () => void
+  promise: Promise<void>
+}
+
+function deferredGate(): DeferredGate {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => {
+    resolve = done
+  })
+  return { resolve, promise }
+}
+
+type FakeTunnelChild = TunnelChildProcess & EventEmitter & {
+  stdout: EventEmitter
+  stderr: EventEmitter
+}
+
+function fakeTunnelChild(): FakeTunnelChild {
+  const child = new EventEmitter() as unknown as FakeTunnelChild
+  child.stdout = new EventEmitter()
+  child.stderr = new EventEmitter()
+  child.exitCode = null
+  child.signalCode = null
+  child.kill = vi.fn(() => {
+    if (child.exitCode === null && child.signalCode === null) child.exitCode = 0
+    return true
+  })
+  return child
+}
+
+const tick = (ms = 0) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+/** Waits until the fake spawn seam has produced `count` children (real fs prep can take a tick or two). */
+async function waitForChildren(children: FakeTunnelChild[], count: number): Promise<void> {
+  for (let i = 0; i < 500 && children.length < count; i++) await tick(2)
+  expect(children.length).toBe(count)
+}
+
+describe('watchPostConnectExit', () => {
+  it('reports an unexpected exit exactly once despite duplicate exit/close events', () => {
+    const child = fakeTunnelChild()
+    const exits: TunnelExitDetail[] = []
+    watchPostConnectExit(child, {
+      isHostStopped: () => false,
+      onUnexpectedExit: (detail) => exits.push(detail)
+    })
+    child.emit('exit', 137, null)
+    child.emit('close', 137, null)
+    child.emit('exit', 137, null)
+    expect(exits).toEqual([{ code: 137, signal: null }])
+  })
+
+  it('never reports a host-initiated death', () => {
+    const child = fakeTunnelChild()
+    const exits: TunnelExitDetail[] = []
+    watchPostConnectExit(child, {
+      isHostStopped: () => true,
+      onUnexpectedExit: (detail) => exits.push(detail)
+    })
+    child.emit('exit', null, 'SIGTERM')
+    child.emit('close', null, 'SIGTERM')
+    expect(exits).toEqual([])
+  })
+})
+
+describe('tunnel relaunch backoff', () => {
+  it('doubles from ~500ms and caps at ~30s', () => {
+    expect(TUNNEL_RELAUNCH_START_MS).toBe(500)
+    expect(TUNNEL_RELAUNCH_MAX_MS).toBe(30_000)
+    expect([1, 2, 3, 4, 5, 6, 7].map((attempt) => tunnelRelaunchDelayMs(attempt))).toEqual([
+      500, 1000, 2000, 4000, 8000, 16000, 30000
+    ])
+    expect(tunnelRelaunchDelayMs(10)).toBe(30_000)
+    expect(tunnelRelaunchDelayMs(12, 9000, 20_000)).toBe(20_000)
+  })
+
+  it('gives up after a bounded number of attempts', () => {
+    expect(TUNNEL_RELAUNCH_MAX_ATTEMPTS).toBe(5)
+  })
+})
+
+describe('cloudflared tunnel lifecycle (F3)', () => {
+  interface FakeCloudflareHarness {
+    instance: Awaited<ReturnType<typeof startCloudflareQuickTunnel>>
+    children: FakeTunnelChild[]
+    delays: number[]
+    gates: DeferredGate[]
+    state: TunnelRuntimeState[]
+    logs: string[]
+  }
+
+  async function startFakeCloudflare(
+    overrides: Partial<CloudflareQuickTunnelOptions> = {}
+  ): Promise<FakeCloudflareHarness> {
+    const children: FakeTunnelChild[] = []
+    const delays: number[] = []
+    const gates: DeferredGate[] = []
+    const state: TunnelRuntimeState[] = []
+    const logs: string[] = []
+    const connecting = startCloudflareQuickTunnel({
+      port: 39871,
+      binaryPath: '/fake/cloudflared',
+      timeoutMs: 100,
+      spawnProcess: (command, args) => {
+        expect(command).toBe('/fake/cloudflared')
+        expect(args).toEqual(['tunnel', '--url', 'http://127.0.0.1:39871'])
+        const child = fakeTunnelChild()
+        children.push(child)
+        return child
+      },
+      delay: (ms) => {
+        delays.push(ms)
+        const gate = deferredGate()
+        gates.push(gate)
+        return gate.promise
+      },
+      onStateChange: (snapshot) => state.push(snapshot),
+      log: (message) => logs.push(message),
+      ...overrides
+    })
+    await waitForChildren(children, 1)
+    children[0]!.stderr.emit('data', 'INF |  https://first-try.trycloudflare.com  |')
+    const instance = await connecting
+    return { instance, children, delays, gates, state, logs }
+  }
+
+  it('flips to down and relaunches once when the child exits unexpectedly', async () => {
+    const harness = await startFakeCloudflare()
+    expect(harness.instance.url).toBe('https://first-try.trycloudflare.com')
+
+    harness.children[0]!.emit('exit', 1, null)
+    harness.children[0]!.emit('close', 1, null)
+    await tick()
+
+    expect(harness.instance.url).toBeUndefined()
+    expect(harness.state.at(-1)).toMatchObject({ provider: 'cloudflare', active: false })
+    expect(harness.logs.some((line) => line.includes('exited unexpectedly'))).toBe(true)
+    expect(harness.delays).toEqual([500])
+
+    harness.gates[0]!.resolve()
+    await waitForChildren(harness.children, 2)
+    harness.children[1]!.stderr.emit('data', 'INF https://second-try.trycloudflare.com')
+    await tick()
+
+    expect(harness.instance.url).toBe('https://second-try.trycloudflare.com')
+    expect(harness.state.at(-1)).toMatchObject({
+      provider: 'cloudflare',
+      active: true,
+      url: 'https://second-try.trycloudflare.com'
+    })
+    expect(harness.children.length).toBe(2)
+
+    await harness.instance.stop()
+  })
+
+  it('does not relaunch when the host stops the tunnel', async () => {
+    const harness = await startFakeCloudflare()
+
+    await harness.instance.stop()
+    expect(harness.children[0]!.kill).toHaveBeenCalledWith('SIGTERM')
+
+    harness.children[0]!.emit('exit', null, 'SIGTERM')
+    harness.children[0]!.emit('close', null, 'SIGTERM')
+    await tick(20)
+
+    expect(harness.children.length).toBe(1)
+    expect(harness.gates.length).toBe(0)
+    expect(harness.delays.length).toBe(0)
+    expect(harness.state.at(-1)).toMatchObject({ provider: 'cloudflare', active: false })
+  })
+
+  it('keeps a single relaunch in flight when exit events arrive rapidly', async () => {
+    const harness = await startFakeCloudflare()
+
+    harness.children[0]!.emit('exit', 2, null)
+    harness.children[0]!.emit('close', 2, null)
+    harness.children[0]!.emit('close', 2, null)
+    harness.children[0]!.emit('exit', 2, null)
+    await tick()
+
+    expect(harness.delays).toEqual([500])
+    expect(harness.gates.length).toBe(1)
+    expect(harness.children.length).toBe(1)
+
+    harness.gates[0]!.resolve()
+    await waitForChildren(harness.children, 2)
+    expect(harness.children.length).toBe(2)
+
+    await harness.instance.stop()
+  })
+
+  it('backs off with a cap and gives up after the attempt limit', async () => {
+    const harness = await startFakeCloudflare({
+      timeoutMs: 20,
+      relaunchStartMs: 4000,
+      relaunchMaxMs: 5000,
+      maxRelaunchAttempts: 3
+    })
+
+    harness.children[0]!.emit('exit', 1, null)
+    await tick()
+    expect(harness.children.length).toBe(1)
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      expect(harness.gates.length).toBe(attempt + 1)
+      harness.gates[attempt]!.resolve()
+      await tick(40)
+    }
+    await tick(20)
+
+    expect(harness.delays).toEqual([4000, 5000, 5000])
+    expect(harness.children.length).toBe(4)
+    expect(harness.state.at(-1)).toMatchObject({ provider: 'cloudflare', active: false })
+    expect(harness.state.at(-1)?.error).toBeTruthy()
+    expect(harness.logs.some((line) => line.includes('gave up after 3 relaunch attempts'))).toBe(
+      true
+    )
+
+    // Settling any stray gates must not spawn further attempts.
+    for (const gate of harness.gates) gate.resolve()
+    await tick(40)
+    expect(harness.children.length).toBe(4)
+
+    await harness.instance.stop()
+  })
+
+  it('kills a replacement tunnel that connects after the host stopped', async () => {
+    const stopped: string[] = []
+    const makeInstance = (url: string): InternetTunnelInstance => ({
+      provider: 'cloudflare',
+      url,
+      process: fakeTunnelChild(),
+      stop: async () => {
+        stopped.push(url)
+      }
+    })
+    let started = 0
+    let releaseStart!: (instance: InternetTunnelInstance) => void
+    const start = vi.fn(
+      () =>
+        new Promise<InternetTunnelInstance>((resolve) => {
+          releaseStart = (instance) => {
+            started += 1
+            resolve(instance)
+          }
+        })
+    )
+    const supervisor = superviseTunnel({
+      provider: 'cloudflare',
+      initial: makeInstance('https://first.trycloudflare.com'),
+      start,
+      delay: async () => undefined
+    })
+
+    supervisor.handleUnexpectedExit({ code: 1, signal: null })
+    await tick()
+    await supervisor.instance.stop()
+    releaseStart(makeInstance(`https://late-${started + 1}.trycloudflare.com`))
+    await tick()
+
+    expect(start).toHaveBeenCalledTimes(1)
+    // The host stop killed the current tunnel; the replacement that connected
+    // afterwards must be killed too, not orphaned.
+    expect(stopped).toEqual(['https://first.trycloudflare.com', 'https://late-1.trycloudflare.com'])
+  })
+})
+
+describe('pinggy tunnel lifecycle (F3)', () => {
+  interface FakePinggyHarness {
+    instance: Awaited<ReturnType<typeof startPinggyTunnel>>
+    children: FakeTunnelChild[]
+    commands: string[]
+    argsList: string[][]
+    delays: number[]
+    gates: DeferredGate[]
+    state: TunnelRuntimeState[]
+  }
+
+  async function startFakePinggy(
+    overrides: Partial<PinggyTunnelOptions> = {}
+  ): Promise<FakePinggyHarness> {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-pinggy-lifecycle-'))
+    const sshPath = join(dir, 'ssh')
+    await writeFile(sshPath, '#!/bin/sh\nexit 0\n')
+    await writeFile(join(dir, 'id'), 'key')
+    const children: FakeTunnelChild[] = []
+    const commands: string[] = []
+    const argsList: string[][] = []
+    const delays: number[] = []
+    const gates: DeferredGate[] = []
+    const state: TunnelRuntimeState[] = []
+    const connecting = startPinggyTunnel({
+      port: 39871,
+      sshPath,
+      knownHostsPath: join(dir, 'known-hosts'),
+      identityPath: join(dir, 'id'),
+      timeoutMs: 100,
+      spawnProcess: (command, args) => {
+        commands.push(command)
+        argsList.push(args)
+        const child = fakeTunnelChild()
+        children.push(child)
+        return child
+      },
+      delay: (ms) => {
+        delays.push(ms)
+        const gate = deferredGate()
+        gates.push(gate)
+        return gate.promise
+      },
+      onStateChange: (snapshot) => state.push(snapshot),
+      ...overrides
+    })
+    await waitForChildren(children, 1)
+    children[0]!.stderr.emit('data', 'https://lifecycle-test.a.pinggy.link')
+    const instance = await connecting
+    return { instance, children, commands, argsList, delays, gates, state }
+  }
+
+  it('flips to down and relaunches once when ssh exits unexpectedly', async () => {
+    const harness = await startFakePinggy()
+    expect(harness.instance.url).toBe('https://lifecycle-test.a.pinggy.link')
+    expect(harness.commands[0]!).toMatch(/ssh$/)
+
+    harness.children[0]!.emit('exit', 255, null)
+    harness.children[0]!.emit('close', 255, null)
+    await tick()
+
+    expect(harness.instance.url).toBeUndefined()
+    expect(harness.state.at(-1)).toMatchObject({ provider: 'pinggy', active: false })
+    expect(harness.delays).toEqual([500])
+
+    harness.gates[0]!.resolve()
+    // Relaunching re-runs the real fs prep (mkdir/identity checks) before
+    // spawning, so wait for the fake spawn seam rather than a fixed tick.
+    await waitForChildren(harness.children, 2)
+    harness.children[1]!.stderr.emit('data', 'https://reconnected.a.pinggy.link')
+    await tick()
+
+    expect(harness.instance.url).toBe('https://reconnected.a.pinggy.link')
+    expect(harness.state.at(-1)).toMatchObject({
+      provider: 'pinggy',
+      active: true,
+      url: 'https://reconnected.a.pinggy.link'
+    })
+
+    await harness.instance.stop()
+  })
+
+  it('does not relaunch when the host stops the tunnel', async () => {
+    const harness = await startFakePinggy()
+
+    await harness.instance.stop()
+    harness.children[0]!.emit('exit', null, 'SIGTERM')
+    harness.children[0]!.emit('close', null, 'SIGTERM')
+    await tick(20)
+
+    expect(harness.children.length).toBe(1)
+    expect(harness.gates.length).toBe(0)
+    expect(harness.delays.length).toBe(0)
+    expect(harness.state.at(-1)).toMatchObject({ provider: 'pinggy', active: false })
+  })
+})
+
+describe('cloudflared binary cache version keying (F7)', () => {
+  function pinLinuxSha256(payload: Buffer): () => void {
+    const spec = CLOUDFLARED_ASSETS['linux-x64']!
+    const original = spec.sha256
+    spec.sha256 = createHash('sha256').update(payload).digest('hex')
+    return () => {
+      spec.sha256 = original
+    }
+  }
+
+  function downloadPayload(payload: Buffer) {
+    return vi.fn(async (_url: string, destination: string) => {
+      await writeFile(destination, payload)
+    })
+  }
+
+  it('reuses the cached binary for the same version without re-downloading', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-tunnel-'))
+    const payload = Buffer.from('cloudflared 2026.1.1 genuine bytes')
+    const restore = pinLinuxSha256(payload)
+    const download = downloadPayload(payload)
+    try {
+      const first = await ensureCloudflaredBinary({
+        cacheDir: dir,
+        version: '2026.1.1',
+        osPlatform: 'linux',
+        osArch: 'x64',
+        download,
+        findOnPath: async () => null
+      })
+      const second = await ensureCloudflaredBinary({
+        cacheDir: dir,
+        version: '2026.1.1',
+        osPlatform: 'linux',
+        osArch: 'x64',
+        download,
+        findOnPath: async () => null
+      })
+      expect(first).toBe(join(dir, '2026.1.1', 'cloudflared'))
+      expect(second).toBe(first)
+      expect(download).toHaveBeenCalledTimes(1)
+      expect(download.mock.calls[0]?.[0]).toContain('/2026.1.1/')
+    } finally {
+      restore()
+    }
+  })
+
+  it('re-downloads when the version changes but keeps the old file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-tunnel-'))
+    const v1 = Buffer.from('cloudflared 2026.1.1 genuine bytes')
+    const v2 = Buffer.from('cloudflared 2026.2.0 genuine bytes')
+    const restore1 = pinLinuxSha256(v1)
+    let payload = v1
+    const download = vi.fn(async (_url: string, destination: string) => {
+      await writeFile(destination, payload)
+    })
+    let restore2: () => void = () => undefined
+    try {
+      const first = await ensureCloudflaredBinary({
+        cacheDir: dir,
+        version: '2026.1.1',
+        osPlatform: 'linux',
+        osArch: 'x64',
+        download,
+        findOnPath: async () => null
+      })
+      expect(first).toBe(join(dir, '2026.1.1', 'cloudflared'))
+
+      restore1()
+      restore2 = pinLinuxSha256(v2)
+      payload = v2
+      const second = await ensureCloudflaredBinary({
+        cacheDir: dir,
+        version: '2026.2.0',
+        osPlatform: 'linux',
+        osArch: 'x64',
+        download,
+        findOnPath: async () => null
+      })
+
+      expect(second).toBe(join(dir, '2026.2.0', 'cloudflared'))
+      expect(download).toHaveBeenCalledTimes(2)
+      expect(download.mock.calls[1]?.[0]).toContain('/2026.2.0/')
+      expect(existsSync(first)).toBe(true)
+    } finally {
+      restore1()
+      restore2()
+    }
+  })
+
+  it('ignores a stale binary left at the cache root by the pre-versioning layout', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-tunnel-'))
+    await writeFile(join(dir, 'cloudflared'), 'stale root binary')
+    const payload = Buffer.from('cloudflared fresh pinned bytes')
+    const restore = pinLinuxSha256(payload)
+    const download = downloadPayload(payload)
+    try {
+      const binaryPath = await ensureCloudflaredBinary({
+        cacheDir: dir,
+        osPlatform: 'linux',
+        osArch: 'x64',
+        download,
+        findOnPath: async () => null
+      })
+      expect(binaryPath).toBe(join(dir, CLOUDFLARED_VERSION, 'cloudflared'))
+      expect(download).toHaveBeenCalledTimes(1)
+    } finally {
+      restore()
+    }
   })
 })
