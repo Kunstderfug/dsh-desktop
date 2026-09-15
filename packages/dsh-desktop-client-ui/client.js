@@ -59,6 +59,18 @@ window.__ModuleLoader__.load({
         const actions = window.dshDesktopActions
         if (!actions || typeof actions.onNewSession !== 'function') return
         actions.onNewSession(() => scope.uiWorkspace.startSession())
+        // Desktop ⌘O / Ctrl+O (File → Add Directory…): the keyboard twin of the
+        // sidebar `+` button. `uiWorkspace` exposes no add-directory API, so the
+        // shell-owned accelerator activates the patched button instead. The
+        // button flips `wsPickerOpen`, so pressing it again while the picker is
+        // already open would close it — hence the `aria-expanded` guard.
+        if (typeof actions.onAddDirectory !== 'function') return
+        actions.onAddDirectory(() => {
+          const addButton = document.querySelector('[data-dsh-workspace-add]')
+          if (!addButton) return
+          if (addButton.getAttribute('aria-expanded') === 'true') return
+          addButton.click()
+        })
       })
     }
 

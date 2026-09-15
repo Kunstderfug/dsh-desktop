@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
-index a6834e1..22b57a9 100644
+index a6834e1..ca046b8 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
 @@ -50,7 +50,9 @@ window.__ModuleLoader__.load({
@@ -390,7 +390,17 @@ index a6834e1..22b57a9 100644
  				archiveSession(sessionId).catch((reason) => {
  					console.warn("session archive rejected:", reason);
  				});
-@@ -2369,11 +2475,13 @@ window.__ModuleLoader__.load({
+@@ -2307,7 +2413,9 @@ window.__ModuleLoader__.load({
+ 										ref: wsPlusRef,
+ 										type: "button",
+ 										className: WorkspaceBrowser_module_css_default.iconButton,
++										"data-dsh-workspace-add": "",
+ 										"aria-label": t("workspace.add"),
++										"aria-expanded": wsPickerOpen,
+ 										onClick: () => {
+ 											setWsPickerOpen((v) => !v);
+ 										},
+@@ -2369,11 +2477,13 @@ window.__ModuleLoader__.load({
  							usePanelInfo,
  							useSessions,
  							useSessionPendingInteraction,
@@ -405,7 +415,7 @@ index a6834e1..22b57a9 100644
  							orderBy,
  							sessionOrderByAccount,
  							sessionUpdatedAtByAccount,
-@@ -2398,8 +2506,10 @@ window.__ModuleLoader__.load({
+@@ -2398,8 +2508,10 @@ window.__ModuleLoader__.load({
  							syncSessionOrderAccount: actions.syncSessionOrderAccount,
  							setSessionOrder: actions.setSessionOrder,
  							archivedSessionIds,
@@ -417,7 +427,7 @@ index a6834e1..22b57a9 100644
  							insertWorkspaceBefore,
  							insertSessionBefore,
  							orderBy,
-@@ -2568,6 +2678,7 @@ window.__ModuleLoader__.load({
+@@ -2568,6 +2680,7 @@ window.__ModuleLoader__.load({
  		const zh = {
  			"group.ungrouped": "未分组",
  			"session.new": "新会话",
@@ -425,7 +435,7 @@ index a6834e1..22b57a9 100644
  			"section.workspaces": "工作区",
  			"section.sessions": "会话",
  			"viewOptions.label": "视图选项",
-@@ -2591,6 +2702,7 @@ window.__ModuleLoader__.load({
+@@ -2591,6 +2704,7 @@ window.__ModuleLoader__.load({
  			"search.noMatches": "无匹配会话",
  			"search.hasMore": "仅显示前 {n} 条结果，请缩小搜索范围。",
  			"menu.addWorkspace": "添加工作区…",
@@ -433,7 +443,7 @@ index a6834e1..22b57a9 100644
  			"picker.loading": "正在加载工作区…",
  			"conflict.named": "已存在名为“{name}”的工作区。",
  			"folderError.title": "无法打开文件夹",
-@@ -2604,6 +2716,8 @@ window.__ModuleLoader__.load({
+@@ -2604,6 +2718,8 @@ window.__ModuleLoader__.load({
  			"delete.desc": "将把“{name}”从工作区列表中移除。文件夹与会话记录会保留，其会话将显示在“未分组”下。",
  			"delete.pending": "正在删除工作区…",
  			"menu.fork": "分叉会话",
@@ -442,7 +452,7 @@ index a6834e1..22b57a9 100644
  			"menu.archiveSession": "归档会话",
  			"sessions.count.one": "{n} 个会话",
  			"sessions.count.other": "{n} 个会话",
-@@ -2618,6 +2732,7 @@ window.__ModuleLoader__.load({
+@@ -2618,6 +2734,7 @@ window.__ModuleLoader__.load({
  			"status.planReview": "计划待审",
  			"status.waitingAnswer": "等待回答",
  			"status.completed": "已完成",
@@ -450,7 +460,7 @@ index a6834e1..22b57a9 100644
  			"schedule.active": "有活动定时任务",
  			"hover.created": "创建于 {time}",
  			"hover.copied": "已复制",
-@@ -2634,6 +2749,7 @@ window.__ModuleLoader__.load({
+@@ -2634,6 +2751,7 @@ window.__ModuleLoader__.load({
  		const en = {
  			"group.ungrouped": "Ungrouped",
  			"session.new": "New Session",
@@ -458,7 +468,7 @@ index a6834e1..22b57a9 100644
  			"section.workspaces": "Workspaces",
  			"section.sessions": "Sessions",
  			"viewOptions.label": "View options",
-@@ -2657,6 +2773,7 @@ window.__ModuleLoader__.load({
+@@ -2657,6 +2775,7 @@ window.__ModuleLoader__.load({
  			"search.noMatches": "No matching sessions",
  			"search.hasMore": "Showing the first {n} results. Narrow your search.",
  			"menu.addWorkspace": "Add workspace…",
@@ -466,7 +476,7 @@ index a6834e1..22b57a9 100644
  			"picker.loading": "Loading workspaces…",
  			"conflict.named": "A workspace named “{name}” already exists.",
  			"folderError.title": "Couldn’t open folder",
-@@ -2670,6 +2787,8 @@ window.__ModuleLoader__.load({
+@@ -2670,6 +2789,8 @@ window.__ModuleLoader__.load({
  			"delete.desc": "This removes “{name}” from the workspace list. The folder and session logs will be kept. Its sessions will appear under Ungrouped.",
  			"delete.pending": "Deleting workspace…",
  			"menu.fork": "Fork session",
@@ -475,7 +485,7 @@ index a6834e1..22b57a9 100644
  			"menu.archiveSession": "Archive session",
  			"sessions.count.one": "{n} session",
  			"sessions.count.other": "{n} sessions",
-@@ -2684,6 +2803,7 @@ window.__ModuleLoader__.load({
+@@ -2684,6 +2805,7 @@ window.__ModuleLoader__.load({
  			"status.planReview": "Plan awaiting review",
  			"status.waitingAnswer": "Waiting for answer",
  			"status.completed": "Completed",

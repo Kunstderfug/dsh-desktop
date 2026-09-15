@@ -150,14 +150,19 @@ contextBridge.exposeInMainWorld('dshDesktopDirectoryPicker', {
 
 /**
  * Menu-accelerator bridge: the shell owns ⌘N / Ctrl+N (File → New Session) and
- * forwards it to the Harness client plugin, which routes it into
- * `uiWorkspace.startSession()` for the active workspace. Single-callback slot —
- * the plugin registers once per page load.
+ * ⌘O / Ctrl+O (File → Add Directory…) and forwards them to the Harness client
+ * plugin, which routes the former into `uiWorkspace.startSession()` for the
+ * active workspace and the latter into the sidebar's add-directory flow.
+ * Single-callback slots — the plugin registers once per page load.
  */
 let newSessionHandler: (() => void) | undefined
+let addDirectoryHandler: (() => void) | undefined
 contextBridge.exposeInMainWorld('dshDesktopActions', {
   onNewSession: (handler: unknown): void => {
     newSessionHandler = typeof handler === 'function' ? (handler as () => void) : undefined
+  },
+  onAddDirectory: (handler: unknown): void => {
+    addDirectoryHandler = typeof handler === 'function' ? (handler as () => void) : undefined
   }
 })
 ipcRenderer.on('desktop:new-session', () => {
@@ -165,6 +170,13 @@ ipcRenderer.on('desktop:new-session', () => {
     newSessionHandler?.()
   } catch (error: unknown) {
     console.warn('[desktop] new-session handler failed', error)
+  }
+})
+ipcRenderer.on('desktop:add-directory', () => {
+  try {
+    addDirectoryHandler?.()
+  } catch (error: unknown) {
+    console.warn('[desktop] add-directory handler failed', error)
   }
 })
 

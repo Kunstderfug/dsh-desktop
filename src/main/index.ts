@@ -2559,6 +2559,15 @@ function installMenu(): void {
               mainWindow.webContents.send('desktop:new-session')
             }
           }
+        },
+        {
+          label: isChinese ? '添加目录…' : 'Add Directory…',
+          accelerator: 'CmdOrCtrl+O',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('desktop:add-directory')
+            }
+          }
         }
       ]
     },
