@@ -345,8 +345,21 @@ describe('multitask task-card fold', () => {
     const { registrations } = applyClient(plugin)
     const rail = queueRailComponent(registrations)
     const pending = { requestId: 'rpc-2', placement: 'queued', text: 'please review the diff' }
-    const live = rail({ session: { queue: [], pendingSubmissions: [pending], running: true } }) as { children: unknown[] }
+    const live = rail({ session: { queue: [], pendingSubmissions: [pending], running: true } }) as { props?: { style?: Record<string, string> }; children: unknown[] }
     expect(railText(live)).toContain('Queued message: please review the diff')
+
+    // The rail must self-constrain like the host QueueDock .dock: the host
+    // renders dock entries in an unstyled flex column with no side padding.
+    const liveStyle = live.props?.style ?? {}
+    expect(liveStyle.width).toBe('calc(100% - var(--dsh-composer-side-clearance, 16px) * 2 - var(--dsh-composer-dock-inset, 8px) * 2)')
+    expect(liveStyle.maxWidth).toBe('calc(var(--dsh-composer-card-max-width, 712px) - var(--dsh-composer-dock-inset, 8px) * 2)')
+    expect(liveStyle.margin).toBe('0 auto 6px')
+    expect(liveStyle.padding).toBe('0 var(--dsh-composer-dock-inset, 8px)')
+    expect(liveStyle.boxSizing).toBe('border-box')
+
+    // Long previews truncate like the host QueueDock .preview instead of wrapping.
+    const liveRow = live.children[0] as { props?: { style?: Record<string, string> } }
+    expect(liveRow.props?.style).toMatchObject({ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })
 
     const admitted = { id: 'msg-2', placement: 'queued', rpcId: 'rpc-2', message: { id: 'msg-2', content: [{ type: 'text', text: 'Orchestrator handoff for MT-3: continue research' }] } }
     const deduped = rail({ session: { queue: [admitted], pendingSubmissions: [pending], running: true } }) as { children: unknown[] }

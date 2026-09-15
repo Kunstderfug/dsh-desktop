@@ -472,11 +472,26 @@ window.__ModuleLoader__.load({
       if (snapshot?.running === false) return null
       const rows = [...queue, ...pending]
       if (rows.length === 0) return null
+      // The host renders dock entries inside an unstyled flex column
+      // (.composerStack, align-items:stretch, no side padding), so every dock
+      // entry must self-constrain to the host composer geometry — matching the
+      // host QueueDock .dock. CSS vars are hashed per host build; the fallbacks
+      // degrade headless/preview surfaces instead of going full-bleed.
       return React.createElement(
         'div',
         {
           'data-dsh-multitask-queue-labels': '',
-          style: { display: 'flex', flexDirection: 'column', gap: '4px', margin: '0 0 6px', fontSize: '11px' }
+          style: {
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px',
+            fontSize: '11px',
+            boxSizing: 'border-box',
+            width: 'calc(100% - var(--dsh-composer-side-clearance, 16px) * 2 - var(--dsh-composer-dock-inset, 8px) * 2)',
+            maxWidth: 'calc(var(--dsh-composer-card-max-width, 712px) - var(--dsh-composer-dock-inset, 8px) * 2)',
+            margin: '0 auto 6px',
+            padding: '0 var(--dsh-composer-dock-inset, 8px)'
+          }
         },
         ...rows.map((row, index) => {
           const preview = queueRowPreview(row)
@@ -486,7 +501,8 @@ window.__ModuleLoader__.load({
             {
               key: row.id ?? row.requestId ?? `${kind}:${index}`,
               'data-dsh-multitask-queue-label': '',
-              'data-kind': kind
+              'data-kind': kind,
+              style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
             },
             kind === 'orchestrator-handoff' ? `Orchestrator handoff: ${preview}` : `Queued message: ${preview}`
           )
