@@ -304,6 +304,7 @@ for f in "$@"; do
         -e 'on run argv' \
         -e 'display dialog (item 1 of argv & " already exists in /Applications. Replace it?") buttons {"Skip", "Replace"} default button "Replace" with icon caution with title "Copy to Applications"' \
         -e 'return button returned of result' \
+        -e 'end run' \
         "$name" 2>/dev/null || echo "Skip")"
       if [ "$answer" != "Replace" ]; then
         notify "Kept the existing /Applications/$name"
