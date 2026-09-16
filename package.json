@@ -406,7 +406,7 @@
       ]
     },
     "dmg": {
-      "format": "ULMO"
+      "format": "ULFO"
     },
     "win": {
       "icon": "build/icon.ico",
