@@ -22,10 +22,11 @@
 #   create-copy-to-applications-service.sh --self-test    # end-to-end check
 #
 # Env (consumed by the installed service at copy time, not by this script):
-#   COPY_TO_APPS_REPLACE=1  remove an existing /Applications/<name> before
-#                           copying. DANGEROUS for running apps (rm -rf of a
+#   COPY_TO_APPS_REPLACE=1  replace an existing /Applications/<name> without
+#                           asking. DANGEROUS for running apps (rm -rf of a
 #                           live bundle, old copy unrecoverable). Off by
-#                           default; duplicates are skipped with a notice.
+#                           default; without it the service shows a
+#                           Replace/Skip dialog for each existing app.
 set -euo pipefail
 
 SERVICES_DIR="$HOME/Library/Services"
@@ -291,16 +292,25 @@ for f in "$@"; do
   name="$(basename "$f")"
   dest="/Applications/$name"
 
-  # REPLACE MODE (opt-in via COPY_TO_APPS_REPLACE=1): remove an existing
-  # destination first. DANGEROUS: rm -rf of a running app's bundle can crash
-  # it and the old copy is unrecoverable. Off by default.
-  if [ "${COPY_TO_APPS_REPLACE:-0}" = "1" ] && [ -e "$dest" ]; then
-    rm -rf "$dest"
-  fi
-
+  # Existing destination: ask the user. COPY_TO_APPS_REPLACE=1 replaces
+  # without asking — DANGEROUS for running apps (rm -rf of a live bundle,
+  # old copy unrecoverable) — so the dialog is the default path.
   if [ -e "$dest" ]; then
-    notify "Already in /Applications — skipped"
-    continue
+    if [ "${COPY_TO_APPS_REPLACE:-0}" = "1" ]; then
+      rm -rf "$dest"
+    else
+      # -128 (close button/ESC) and any dialog failure keep the existing copy.
+      answer="$(/usr/bin/osascript \
+        -e 'on run argv' \
+        -e 'display dialog (item 1 of argv & " already exists in /Applications. Replace it?") buttons {"Skip", "Replace"} default button "Replace" with icon caution with title "Copy to Applications"' \
+        -e 'return button returned of result' \
+        "$name" 2>/dev/null || echo "Skip")"
+      if [ "$answer" != "Replace" ]; then
+        notify "Kept the existing /Applications/$name"
+        continue
+      fi
+      rm -rf "$dest"
+    fi
   fi
 
   # Primary path: unprivileged copy. Works because /Applications is
@@ -344,7 +354,7 @@ do_install() {
   flush_services
   echo "Installed: $SERVICES_DIR/$BUNDLE_NAME"
   echo "Use it: in Finder, right-click an .app -> Quick Actions -> Copy to Applications."
-  echo "Optional: set COPY_TO_APPS_REPLACE=1 to overwrite existing copies (dangerous for running apps)."
+  echo "Existing apps: the service asks Replace/Skip per app; set COPY_TO_APPS_REPLACE=1 to replace without asking (dangerous for running apps)."
 }
 
 do_uninstall() {
