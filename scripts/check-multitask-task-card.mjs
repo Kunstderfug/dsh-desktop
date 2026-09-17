@@ -3,14 +3,13 @@
 //
 // Ensures-or-attaches `npm run dev` (the composed desktop profile with the
 // permanent host + client plugins, browser journal, projection feed, chat
-// slots, tool presenters, queue rows, and lineage header), then drives a
+// slots, tool presenters, and lineage header), then drives a
 // `/multitask` lifecycle over Chrome DevTools Protocol and asserts:
 //
 //   (a) one keyed task card renders the objective, child ids, and live
 //       phase chips as events arrive, including a terminal failure card;
 //   (b) claim changes badge the affected tool presenter through the
 //       existing `multitask/claims` projection feed;
-//   (c) orchestrator handoffs receive a distinct queue-row label;
 //   (d) lineage context stays usable and does not duplicate task identity;
 //   (e) a narrow/mobile viewport degrades to readable text (objective,
 //       phase, task id, claim state) without crashing;
@@ -47,8 +46,6 @@ const claimPrompt = (taskId) => [
   `Do not write files. After the tool returns, reply exactly "claim probe complete ${EPOCH}".`
 ].join(' ')
 const BUSY_PROMPT = `Use the terminal once to run "sleep 20". After it completes, reply exactly "busy-turn probe complete ${EPOCH}".`
-const HANDOFF_LINE = `Orchestrator handoff for MT-PLACEHOLDER: continue ${OBJECTIVE_OK}`
-const PLAIN_QUEUE = `plain queued user message ${EPOCH}`
 
 const projectRoot = join(import.meta.dirname, '..')
 const FORBIDDEN_PATHS = [
@@ -195,12 +192,6 @@ const PAGE_HELPERS = `
     },
     placeholders() {
       return document.querySelectorAll('[data-dsh-multitask-placeholder]').length
-    },
-    queueLabels() {
-      return [...document.querySelectorAll('[data-dsh-multitask-queue-label]')].map((el) => ({
-        kind: el.getAttribute('data-kind'),
-        text: el.textContent ?? ''
-      }))
     },
     claimBadges() {
       return [...document.querySelectorAll('[data-dsh-multitask-claim-badge]')].map((el) => ({
@@ -671,23 +662,6 @@ try {
     'the composer to expose the running-turn controls',
     CARD_DEADLINE_MS
   )
-  await typeLine(endpoint, PLAIN_QUEUE)
-  await pressEnter(endpoint)
-  const handoff = HANDOFF_LINE.replace('MT-PLACEHOLDER', cardOk.id ?? 'MT-1')
-  await typeLine(endpoint, handoff)
-  await pressEnter(endpoint)
-  const labels = await evaluateUntil(
-    endpoint,
-    async () => {
-      const rows = await pageCall(endpoint, 'queueLabels')
-      const hasHandoff = rows.some((row) => row.kind === 'orchestrator-handoff' && row.text.includes(cardOk.id ?? 'MT-'))
-      const hasUser = rows.some((row) => row.kind === 'user' && row.text.includes(PLAIN_QUEUE))
-      return hasHandoff && hasUser ? rows : false
-    },
-    'distinct queue-row labels for handoff vs plain user text',
-    CARD_DEADLINE_MS
-  )
-  log(`check-multitask-task-card: queue labels distinguished handoff vs user (${labels.length} labeled rows)`)
 
   await evaluateUntil(
     endpoint,

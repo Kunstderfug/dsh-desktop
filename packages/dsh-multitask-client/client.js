@@ -17,7 +17,6 @@ window.__ModuleLoader__.load({
       'failed'
     ])
     const NARROW_MAX_WIDTH = 640
-    const HANDOFF_PATTERN = /orchestrator handoff for (MT-[1-9][0-9]*)/i
     const TASK_ID_PATTERN = /MT-[1-9][0-9]*/g
     const CLAIM_PROJECTION = 'multitask/claims'
     const BASH_TIER2_SCOPE_NOTE = 'Native write/edit tools are guarded; Bash writes are not covered by tier 2.'
@@ -62,10 +61,6 @@ window.__ModuleLoader__.load({
         .replace(/\\/g, '/')
         .replace(/^(?:\.\/)+/u, '')
         .replace(/\/+$/u, '')
-    }
-
-    function queueRowKind(text) {
-      return HANDOFF_PATTERN.test(String(text ?? '')) ? 'orchestrator-handoff' : 'user'
     }
 
     function claimBadgeForPath(path, claims) {
@@ -444,72 +439,6 @@ window.__ModuleLoader__.load({
       return null
     }
 
-    function queueRowPreview(row) {
-      if (typeof row?.preview === 'string') return row.preview
-      if (typeof row?.text === 'string') return row.text
-      const content = row?.message?.content
-      if (Array.isArray(content)) {
-        const parts = []
-        for (const block of content) {
-          if (block?.type === 'text' && typeof block.text === 'string') parts.push(block.text)
-        }
-        return parts.join(' ')
-      }
-      return ''
-    }
-
-    function QueueLabelRail({ useInput, session }) {
-      const input = typeof useInput === 'function' ? useInput((state) => state) : undefined
-      const snapshot = session ?? input
-      const queue = snapshot?.queue ?? []
-      const admitted = new Set(queue.flatMap((row) => (row.rpcId === undefined ? [] : [row.rpcId])))
-      const pending = (snapshot?.pendingSubmissions ?? []).filter((row) => (
-        row.placement === 'queued' && !admitted.has(row.requestId)
-      ))
-      // An idle session has a drained inbox: a queue row or an unretired
-      // submission echo at rest is stale client state, and rendering it kept
-      // the "Queued message: …" label pinned after the message was delivered.
-      if (snapshot?.running === false) return null
-      const rows = [...queue, ...pending]
-      if (rows.length === 0) return null
-      // The host renders dock entries inside an unstyled flex column
-      // (.composerStack, align-items:stretch, no side padding), so every dock
-      // entry must self-constrain to the host composer geometry — matching the
-      // host QueueDock .dock. CSS vars are hashed per host build; the fallbacks
-      // degrade headless/preview surfaces instead of going full-bleed.
-      return React.createElement(
-        'div',
-        {
-          'data-dsh-multitask-queue-labels': '',
-          style: {
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '4px',
-            fontSize: '11px',
-            boxSizing: 'border-box',
-            width: 'calc(100% - var(--dsh-composer-side-clearance, 16px) * 2 - var(--dsh-composer-dock-inset, 8px) * 2)',
-            maxWidth: 'calc(var(--dsh-composer-card-max-width, 712px) - var(--dsh-composer-dock-inset, 8px) * 2)',
-            margin: '0 auto 6px',
-            padding: '0 var(--dsh-composer-dock-inset, 8px)'
-          }
-        },
-        ...rows.map((row, index) => {
-          const preview = queueRowPreview(row)
-          const kind = queueRowKind(preview)
-          return React.createElement(
-            'div',
-            {
-              key: row.id ?? row.requestId ?? `${kind}:${index}`,
-              'data-dsh-multitask-queue-label': '',
-              'data-kind': kind,
-              style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
-            },
-            kind === 'orchestrator-handoff' ? `Orchestrator handoff: ${preview}` : `Queued message: ${preview}`
-          )
-        })
-      )
-    }
-
     function LineageChip() {
       const tasks = React.useSyncExternalStore((onStoreChange) => {
         published.listeners.add(onStoreChange)
@@ -623,10 +552,6 @@ window.__ModuleLoader__.load({
         { name: 'conversation.chat.commandview', key: 'multitask' },
         MultitaskCommandView
       ))
-      ctx.slots.inject('conversation.input.dock', () => ctx.slots.register(
-        { name: 'conversation.input.dock', id: 'dsh-multitask-queue-label', order: 21 },
-        QueueLabelRail
-      ))
       ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register(
         { name: 'conversation.session.header.actions', id: 'dsh-multitask-lineage', order: 40 },
         LineageChip
@@ -661,14 +586,11 @@ window.__ModuleLoader__.load({
     exports.inject = inject
     exports.foldTasks = foldTasks
     exports.displayPhase = displayPhase
-    exports.queueRowKind = queueRowKind
-    exports.queueRowPreview = queueRowPreview
     exports.claimBadgeForPath = claimBadgeForPath
     exports.formatTaskCardText = formatTaskCardText
     exports.extractTaskId = extractTaskId
     exports.TASK_PHASES = TASK_PHASES
     exports.NARROW_MAX_WIDTH = NARROW_MAX_WIDTH
-    exports.HANDOFF_PATTERN = HANDOFF_PATTERN
     return module.exports
   }
 })

@@ -10,7 +10,7 @@ It runs, in order, from the repository root:
 
 1. ``npx vitest run test/multitask-task-card.test.ts`` — source/projection contracts
 2. ``node scripts/check-multitask-task-card.mjs`` — real dev-app lifecycle,
-   failure, claim-badge, queue-label, lineage, and narrow-text scenario
+   failure, claim-badge, lineage, and narrow-text scenario
 3. ``npm test``
 4. ``npm run typecheck``
 5. ``npm run build``
