@@ -1,8 +1,39 @@
 diff --git a/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js b/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js
-index 8dd94c6..0dd37d2 100644
+index 8dd94c6..bf0270d 100644
 --- a/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js
-@@ -830,6 +830,19 @@ function resolveBundleDir(binName, packageName, installAnchor, profileDir) {
+@@ -419,14 +419,28 @@ function ensureSymlink(link, target) {
+ 		}
+ 		if (stat !== void 0) {
+ 			if (symlinkPointsTo(link, target)) return;
+-			unlinkSync(link);
++			try {
++				unlinkSync(link);
++			} catch (unlinkError) {
++				if (process.platform === "win32") rmSync(link, { recursive: true, force: true });
++				else throw unlinkError;
++			}
+ 		}
+ 	}
+ 	try {
+ 		symlinkSync(target, link, "junction");
+ 	} catch (error) {
+ 		/* v8 ignore next 4 */
+-		if (error.code !== "EEXIST" || !lstatSync(link).isSymbolicLink() || !symlinkPointsTo(link, target)) throw error;
++		if (error.code !== "EEXIST" || !lstatSync(link).isSymbolicLink() || !symlinkPointsTo(link, target)) {
++			if (process.platform === "win32") {
++				try {
++					rmSync(link, { recursive: true, force: true });
++					symlinkSync(target, link, "junction");
++					return;
++				} catch { /* ignore */ }
++			}
++			throw error;
++		}
+ 	}
+ }
+ /** Resolve a link target without following the final path component. */
+@@ -830,6 +844,19 @@ function resolveBundleDir(binName, packageName, installAnchor, profileDir) {
  	}
  	throw new Error(`${binName}: cannot resolve profile bundle ${JSON.stringify(packageName)} from the dsh installation or ${profileDir}; run 'dsh plugin --profile ${basename(profileDir)} install' if its dependency is not installed`);
  }
@@ -22,7 +53,7 @@ index 8dd94c6..0dd37d2 100644
  /**
  * Load an already initialized profile directory without resolving it through
  * the shared Harness home. This is used by application-owned profiles whose
-@@ -847,16 +860,26 @@ function loadProfileDirectory(binName, dir, installAnchor, options = {}) {
+@@ -847,16 +874,26 @@ function loadProfileDirectory(binName, dir, installAnchor, options = {}) {
  	if (rawPatchReload !== void 0 && rawPatchReload !== "live" && rawPatchReload !== "startup") throw new Error(`${binName}: profile manifest ${join(dir, "package.json")} dsh.profile.patchReload must be "live" or "startup"`);
  	const patchReload = rawPatchReload ?? "live";
  	const layers = bundles.map((packageName) => {
@@ -59,7 +90,26 @@ index 8dd94c6..0dd37d2 100644
  	});
  	const patchPath = join(dir, PROFILE_PATCH_FILENAME);
  	const patches = options.userLayer !== false && existsSync(patchPath) ? loadOverlayPatches(binName, patchPath) : [];
-@@ -1466,6 +1489,7 @@ async function assertEntriesActivated(ctx, binName) {
+@@ -1332,6 +1369,18 @@ async function mountRootInclude(ctx, absoluteConfigPath, patches = [], bareModul
+ 		}
+ 	};
+ 	ctx.loader.builtins.group = Group;
++	// Plugins may also add entries at runtime through `ctx.loader.create`, which
++	// the Loader's own root group imports with the Loader's base URL. A host
++	// that owns the complete plugin set must resolve those bare names the same
++	// way, or they fall back to the configuration directory.
++	if (bareModuleBaseUrl !== void 0) {
++		const loader = ctx.loader;
++		const importFromConfig = loader.import.bind(loader);
++		loader.import = (name, getOuterStack) => {
++			if (name.startsWith(".") || name.startsWith("cordis:") || isAbsolute(name) || loader.internal === void 0) return importFromConfig(name, getOuterStack);
++			return loader.internal.import(name, bareModuleBaseUrl, {});
++		};
++	}
+ 	const rootInclude = {
+ 		id: "include",
+ 		name: "cordis:include",
+@@ -1466,6 +1515,7 @@ async function assertEntriesActivated(ctx, binName) {
  	assertEntriesLoaded(ctx, binName);
  	const failures = [];
  	const rejectionReasons = [];
@@ -67,7 +117,7 @@ index 8dd94c6..0dd37d2 100644
  	for (const entry of ctx.loader.entries()) {
  		const fiber = entry.fiber;
  		if (fiber === void 0 || entry.disabled) continue;
-@@ -1476,6 +1500,7 @@ async function assertEntriesActivated(ctx, binName) {
+@@ -1476,6 +1526,7 @@ async function assertEntriesActivated(ctx, binName) {
  				await fiber.await();
  			} catch (error) {
  				rejectionReasons.push(error);
@@ -75,7 +125,7 @@ index 8dd94c6..0dd37d2 100644
  				failures.push(`${entry.options.name}: ${formatActivationError(error)}`);
  			}
  			continue;
-@@ -1485,11 +1510,12 @@ async function assertEntriesActivated(ctx, binName) {
+@@ -1485,11 +1536,12 @@ async function assertEntriesActivated(ctx, binName) {
  			const subject = missing.length === 1 ? "service" : "services";
  			failures.push(`${entry.options.name}: pending (waiting for ${subject}: ${missing.join(", ") || "unknown"})`);
  		} else failures.push(`${entry.options.name}: fiber state ${String(state)}`);
@@ -89,7 +139,7 @@ index 8dd94c6..0dd37d2 100644
  	}
  }
  /**
-@@ -1537,7 +1563,11 @@ async function boot(binName, absoluteConfigPath, patches, prepare, bareModuleBas
+@@ -1537,7 +1589,11 @@ async function boot(binName, absoluteConfigPath, patches, prepare, bareModuleBas
  		await assertEntriesActivated(ctx, binName);
  		return ctx;
  	} catch (cause) {

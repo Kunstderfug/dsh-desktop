@@ -39,7 +39,6 @@ describe('assistant local path links', () => {
     )
 
     expect(patch).toContain('localPathReference(value)')
-    expect(patch).toContain('paths ?? []')
     expect(patch).toContain('#L\\d+')
     expect(patch).toContain('[A-Za-z]:[\\\\/]')
     // Upstream 0.1.5-rc.2 already routes opening through `owner.openFile` via a
@@ -87,7 +86,7 @@ describe('assistant local path links', () => {
     for (const value of [
       './@scope/pkg',
       '/tmp/@scope/pkg/index.js',
-      'patches/@deepseek-ai+dsh-client-ui-deliverables+0.1.2-rc.1.patch',
+      'patches/@deepseek-ai+dsh-client-ui-deliverables+0.1.5-rc.2.patch',
       'node_modules/@foo/bar/lib/client.js',
     ]) {
       expect(localPathReference(value), value).toBe(value)

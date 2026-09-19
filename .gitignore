@@ -30,3 +30,11 @@ __pycache__/
 
 # ppt:build incremental cache marker (scripts/ppt-build.mjs)
 /packages/ppt-runtime/.build-cache.json
+
+# Local-only design docs
+docs/plugin-management.zh.md
+docs/default-capabilities.zh.md
+docs/mobile-connection-latency.zh.md
+
+# Local pnpm content store
+/.pnpm-store/

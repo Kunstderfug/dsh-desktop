@@ -1,70 +1,121 @@
-import { readFile, readdir } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { Context } from '@deepseek-ai/cordis'
+import SessionStore, { SESSION_FORMAT_VERSION, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
+import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { describe, expect, it } from 'vitest'
-import { projectRoot } from './patch-path'
 
-/**
- * Permanent session deletion was retired for the Harness 0.1.5 line.
- *
- * Upstream deleted the infrastructure the feature was built on — the
- * `SessionPreparations` class, `deleteStored` on the storage backend, and the
- * coordinator delete path — leaving nothing to attach a patch to. The four
- * patches that carried it now live in
- * `doc/harness-upgrade/retired-session-delete/` and are intentionally absent
- * from `patches/`.
- *
- * These tests guard the retirement decisions rather than the feature, so a
- * later revival has to be deliberate.
- */
-const retiredPackages = [
-  'dsh-session-persistence',
-  'dsh-session-persistence-jsonl',
-  'dsh-api-session-controller',
-  'dsh-workspace'
+const projectRoot = path.resolve(import.meta.dirname, '..')
+
+// version tracks the patch-filename suffix; every Harness upgrade renames all of them
+const patchedPackages = [
+  {
+    name: 'dsh-session-persistence',
+    version: '0.1.5-rc.2',
+    file: 'lib/index.js',
+    markers: ['does not support deletion', 'delete(_id, _options)', 'Permanently remove one stored Session identity']
+  },
+  {
+    name: 'dsh-session-persistence-jsonl',
+    version: '0.1.5-rc.2',
+    file: 'lib/index.js',
+    markers: ['async delete(id, options)', 'this.tracker.claimWrite(id)', 'this.coldLogMemo.delete(id)']
+  },
+  {
+    name: 'dsh-workspace',
+    version: '0.1.5-rc.2',
+    file: 'lib/index.js',
+    markers: ['forgetSession(sessionId)', 'archivedSessionIds: state.archivedSessionIds.filter']
+  },
+  {
+    name: 'dsh-api-session-controller',
+    version: '0.1.5-rc.2',
+    file: 'lib/index.js',
+    markers: ['disposeOwned(sessionId)', 'await persistence.delete(request.sessionId)', 'workspaceRegistry.forgetSession(request.sessionId)']
+  },
+  {
+    name: 'dsh-api-session-controller',
+    version: '0.1.5-rc.2',
+    file: 'lib/client.js',
+    markers: ['SessionDeleteError', 'this.remote.session.delete({ sessionId })', 'if (this.watched === sessionId) this.watched = void 0']
+  },
+  {
+    name: 'dsh-api-session-controller',
+    version: '0.1.5-rc.2',
+    file: 'lib/typert.host.js',
+    markers: ["id: '@deepseek-ai/dsh-api-session-controller#session/delete'", "method: 'delete'"]
+  },
+  {
+    name: 'dsh-client-ui-workspace',
+    version: '0.1.5-rc.2',
+    file: 'lib/client.js',
+    markers: ['delete.session', 'danger: true', 'Workspace files are kept', 'await sessions.delete(sessionId)']
+  }
 ] as const
 
-const readNodeModule = (name: string, file: string) =>
-  readFile(path.join(projectRoot, 'node_modules', '@deepseek-ai', name, file), 'utf8')
+describe('permanent session deletion dependency patches', () => {
+  it.each(patchedPackages)('$name patch is reproducible and installed', async ({ name, file, markers, version }) => {
+    const [patch, installed] = await Promise.all([
+      readFile(path.join(projectRoot, 'patches', `@deepseek-ai+${name}+${version}.patch`), 'utf8'),
+      readFile(path.join(projectRoot, 'node_modules', '@deepseek-ai', name, file), 'utf8')
+    ])
 
-describe('permanent session deletion retired for the 0.1.5 line', () => {
-  it.each(retiredPackages)(
-    'carries no %s patch, so nothing dead targets the deleted upstream API',
-    async (name) => {
-      const patchNames = await readdir(path.join(projectRoot, 'patches'))
-      const lingering = patchNames.filter((file) =>
-        file.startsWith(`${name.replace('/', '+')}+`)
-      )
-      expect(lingering).toEqual([])
+    for (const marker of markers) {
+      expect(patch).toContain(marker)
+      expect(installed).toContain(marker)
     }
-  )
-
-  it('leaves no session-delete API in the installed persistence surface', async () => {
-    const index = await readNodeModule('dsh-session-persistence', 'lib/index.js')
-
-    expect(index).not.toContain('assertDeletable')
-    expect(index).not.toContain('deleteStored')
-    expect(index).not.toContain('waitForRetirement')
-  })
-})
-
-describe('session deletion UI is absent from the shipped workspace bundle', () => {
-  /**
-   * The feature is retired, so no delete affordance should reach users. The
-   * workspace UI patch is regenerated with gen-patch.sh after any edit here.
-   */
-  it('exposes no session delete affordance', async () => {
-    const ui = await readNodeModule('dsh-client-ui-workspace', 'lib/client.js')
-
-    expect(ui).not.toContain('deleteSession')
-    expect(ui).not.toContain('await sessions.delete(')
-    expect(ui).not.toContain('"delete.session"')
-    expect(ui).not.toContain('工作区文件会保留。此操作无法撤销。')
   })
 
-  it('leaves workspace deletion (a separate feature) intact', async () => {
-    const ui = await readNodeModule('dsh-client-ui-workspace', 'lib/client.js')
+  it('states the destructive retention boundary in both locales', async () => {
+    const ui = await readFile(
+      path.join(projectRoot, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js'),
+      'utf8'
+    )
 
-    expect(ui).toContain('delete.workspace')
-    expect(ui).toContain('onDeleteRequest')
+    expect(ui).toContain('工作区文件会保留。此操作无法撤销。')
+    expect(ui).toContain('Workspace files are kept. This can’t be undone.')
+  })
+
+  it('removes one materialized JSONL log without touching another session', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'dsh-desktop-session-delete-'))
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    const fiber = await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
+    const persistence = ctx.sessionPersistence as typeof ctx.sessionPersistence & {
+      delete(id: ReturnType<typeof SessionId>): Promise<boolean>
+    }
+    const removed = SessionId('desktop-delete-removed')
+    const kept = SessionId('desktop-delete-kept')
+    const event = [{ type: 'turn/start', seq: SessionSeq(0), time: 1, data: { turn: 1 } }] as const
+
+    // 0.1.5 replaced the append/load seam with per-session handles: `create`
+    // hands back the single write handle, and `flush` is the durability
+    // barrier that materializes the artifact deletion has to find.
+    const seed = async (id: ReturnType<typeof SessionId>, createdAt: number): Promise<void> => {
+      const handle = await persistence.create({ version: SESSION_FORMAT_VERSION, id, createdAt, isSeeded: false })
+      try {
+        await handle.append(event)
+        await handle.flush()
+      } finally {
+        await handle.close()
+      }
+    }
+
+    try {
+      await seed(removed, 1)
+      await seed(kept, 2)
+
+      expect(await persistence.delete(removed)).toBe(true)
+      expect((await persistence.list()).map((snapshot) => snapshot.header.id)).toEqual([kept])
+      expect(await persistence.stat(removed)).toBeUndefined()
+      expect((await persistence.stat(kept))?.header.id).toBe(kept)
+      // A second delete of the same id is a no-op, not a failure.
+      expect(await persistence.delete(removed)).toBe(false)
+      expect(await persistence.delete(SessionId('desktop-delete-missing'))).toBe(false)
+    } finally {
+      await fiber.dispose()
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })

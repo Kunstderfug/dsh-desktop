@@ -2,7 +2,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js b/node_m
 index 306645f..67aea85 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
-@@ -1124,7 +1124,10 @@ window.__ModuleLoader__.load({
+@@ -1124,7 +1124,10 @@
  			return Math.max(1, Math.ceil(milliseconds / 1e3));
  		}
  		function failureMessage(message, code, t) {
@@ -14,7 +14,7 @@ index 306645f..67aea85 100644
  		}
  		function ModelRetryItem({ node, active, t }) {
  			const deadline = (0, react.useMemo)(() => Date.now() + node.delayMs, [node.delayMs, node.seq]);
-@@ -2634,6 +2637,8 @@ window.__ModuleLoader__.load({
+@@ -2634,6 +2637,8 @@
  			"stats.dialog.toolTime": "工具调用用时",
  			"stats.dialog.ttft": "首 token 平均（TTFT）",
  			"stats.dialog.speed": "输出速度（TPS）",
@@ -23,7 +23,7 @@ index 306645f..67aea85 100644
  			"chat.loadingHistory": "载入历史…",
  			"chat.loadError": "历史加载失败：{message}（{code}）",
  			"chat.loadOlder": "加载更早",
-@@ -2694,6 +2699,8 @@ window.__ModuleLoader__.load({
+@@ -2694,6 +2699,8 @@
  			"message.retry.delay": "重试延迟：",
  			"message.retry.failure": "失败原因：",
  			"message.failure.auth": "API 密钥无效",
@@ -32,7 +32,7 @@ index 306645f..67aea85 100644
  			"message.turnError": "本轮运行失败",
  			"message.maxTokens": "已达到输出 token 上限",
  			"message.maxTokens.hint": "回答被截断，已有输出保留在对话中。发送“继续”可让模型接着输出。",
-@@ -2740,6 +2747,8 @@ window.__ModuleLoader__.load({
+@@ -2740,6 +2747,8 @@
  			"stats.dialog.toolTime": "Tool time",
  			"stats.dialog.ttft": "Avg time to first token (TTFT)",
  			"stats.dialog.speed": "Tokens per second (TPS)",
@@ -41,7 +41,7 @@ index 306645f..67aea85 100644
  			"chat.loadingHistory": "Loading history…",
  			"chat.loadError": "Failed to load history: {message} ({code})",
  			"chat.loadOlder": "Load earlier",
-@@ -2800,6 +2809,8 @@ window.__ModuleLoader__.load({
+@@ -2800,6 +2809,8 @@
  			"message.retry.delay": "Retry delay: ",
  			"message.retry.failure": "Failure reason: ",
  			"message.failure.auth": "API key is invalid",
@@ -50,7 +50,7 @@ index 306645f..67aea85 100644
  			"message.turnError": "This turn failed",
  			"message.maxTokens": "Output token limit reached",
  			"message.maxTokens.hint": "The reply was cut off; earlier output is preserved in the conversation. Send \"continue\" to let the model resume.",
-@@ -3839,7 +3850,7 @@ window.__ModuleLoader__.load({
+@@ -3839,7 +3850,7 @@
  		}
  		//#endregion
  		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-chat/src/client/chat/StatsPills.module.css.mjs
@@ -59,10 +59,11 @@ index 306645f..67aea85 100644
  		const tagId$1 = "@deepseek-ai/dsh-client-ui-chat/StatsPills.module.css";
  		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$1) + "]") === null) {
  			const tag = document.createElement("style");
-@@ -3941,10 +3952,208 @@ window.__ModuleLoader__.load({
+@@ -3940,11 +3951,209 @@
+ 		*/
  		function billedInputTokens(usage) {
  			return usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
- 		}
++		}
 +		/**
 +		* DeepSeek list prices in USD per 1M tokens, split by the provider's peak
 +		* and off-peak windows. The durable routeUsage projection already separates
@@ -167,7 +168,7 @@ index 306645f..67aea85 100644
 +			const hours = Math.floor(minutes / 60);
 +			const rest = minutes % 60;
 +			return hours > 0 ? `${hours}h${String(rest).padStart(2, "0")}m` : `${rest}m`;
-+		}
+ 		}
 +		function quotaBar(percentage) {
 +			const filled = Math.round(Math.min(100, Math.max(0, percentage)) / 12.5);
 +			return "\u2588".repeat(filled) + "\u2591".repeat(8 - filled);
@@ -269,7 +270,7 @@ index 306645f..67aea85 100644
  			const { open, setOpen, rootRef, panelRef, pos } = useStatDialog(dialog);
  			const counts = t("stats.counts", {
  				turns: stats.turns,
-@@ -4004,7 +4213,8 @@ window.__ModuleLoader__.load({
+@@ -4004,7 +4213,8 @@
  								stats.llmMs > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.llmTime") }), (0, react_jsx_runtime.jsx)("dd", { children: formatDuration(stats.llmMs, t) })] }),
  								stats.toolMs > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.toolTime") }), (0, react_jsx_runtime.jsx)("dd", { children: formatDuration(stats.toolMs, t) })] }),
  								stats.ttftSteps > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.ttft") }), (0, react_jsx_runtime.jsx)("dd", { children: formatDuration(stats.ttftMs / stats.ttftSteps, t) })] }),
@@ -279,7 +280,7 @@ index 306645f..67aea85 100644
  							]
  						})
  					]
-@@ -4079,6 +4289,9 @@ window.__ModuleLoader__.load({
+@@ -4079,6 +4289,9 @@
  		const StatsPills = (0, react.memo)(function StatsPills({ useChat, useProjection, t }) {
  			const settledNodes = useChat((s) => s.legacy.nodes);
  			const usage = useProjection("tokenUsage");
@@ -289,7 +290,7 @@ index 306645f..67aea85 100644
  			const [openPill, setOpenPill] = (0, react.useState)(null);
  			const projected = useProjection("sessionStats");
  			const stats = (0, react.useMemo)(() => projected ?? deriveStats(settledNodes), [projected, settledNodes]);
-@@ -4090,6 +4303,8 @@ window.__ModuleLoader__.load({
+@@ -4090,6 +4303,8 @@
  				children: [stats.steps > 0 && (0, react_jsx_runtime.jsx)(TimePill, {
  					stats,
  					t,
@@ -298,7 +299,7 @@ index 306645f..67aea85 100644
  					dialog: {
  						open: openPill === "time",
  						setOpen: (open) => {
-@@ -4105,7 +4320,7 @@ window.__ModuleLoader__.load({
+@@ -4105,7 +4320,7 @@
  							setOpenPill(open ? "usage" : null);
  						}
  					}
@@ -307,7 +308,7 @@ index 306645f..67aea85 100644
  			});
  		});
  		//#endregion
-@@ -8362,6 +8577,9 @@ window.__ModuleLoader__.load({
+@@ -8362,6 +8577,9 @@
  		exports.inject = inject;
  		exports.isRunningTool = isRunningTool;
  		exports.isSettledTool = isSettledTool;

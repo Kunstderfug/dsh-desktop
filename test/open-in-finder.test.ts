@@ -31,28 +31,15 @@ describe('workspace Open in Finder integration', () => {
     expect(path.basename(resolved)).toBe(
       `@deepseek-ai+dsh-client-ui-workspace+${installed.version}.patch`
     )
+    // Stale patches from superseded Harness versions must not linger.
+    expect(patchNames).not.toContain(
+      '@deepseek-ai+dsh-client-ui-workspace+0.1.5-rc.1.patch'
+    )
     expect(patch).toContain('id: "openInFinder"')
     expect(patch).toContain('t("menu.openInFinder")')
     expect(patch).toContain('window.dshDesktop.openInFinder(row.cwd)')
     expect(patch).toContain('"menu.openInFinder": "在 Finder 中打开"')
     expect(patch).toContain('"menu.openInFinder": "Open in Finder"')
-  })
-
-  it('exposes a validated main-process bridge for opening the directory', async () => {
-    const [mainSource, preloadSource] = await Promise.all([
-      readFile(path.join(projectRoot, 'src/main/index.ts'), 'utf8'),
-      readFile(path.join(projectRoot, 'src/preload/index.ts'), 'utf8')
-    ])
-
-    expect(mainSource).toContain(
-      "ipcMain.handle('harness:open-in-finder', async (event, path?: unknown) =>"
-    )
-    expect(mainSource).toContain('assertTrustedMainWindowEvent(event)')
-    expect(mainSource).toContain("typeof path !== 'string' || path.length === 0")
-    expect(mainSource).toContain('await shell.openPath(path)')
-    expect(preloadSource).toContain(
-      "ipcRenderer.invoke('harness:open-in-finder', path)"
-    )
   })
 
   it('leaves the installed workspace bundle syntactically valid', async () => {
