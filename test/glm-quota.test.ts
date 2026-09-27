@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { readFile } from 'node:fs/promises'
@@ -142,6 +142,9 @@ describe('main-process quota poller', () => {
     vi.unstubAllGlobals()
     delete process.env.ZAI_API_KEY
     vi.clearAllMocks()
+    // newer layouts written by individual tests must not leak into the next
+    rmSync(path.join(testHome, 'harness', 'profiles'), { recursive: true, force: true })
+    rmSync(path.join(testHome, 'harness', 'settings.yaml.imported'), { force: true })
   })
 
   let handler: () => Promise<{ status: string }>
@@ -205,6 +208,59 @@ describe('main-process quota poller', () => {
     expect(snapshot.status).toBe('ok')
     expect(snapshot.tokens.percentage).toBe(41.6)
     expect(snapshot.session).not.toBeNull()
+  })
+
+  it('reads the provider from the migrated profile cordis.patch.yml layout', async () => {
+    // Harness 0.10 imports settings.yaml into profiles/<name>/cordis.patch.yml
+    // and renames the original — the indicator must keep working after that
+    // migration without a settings.yaml present.
+    const profileDir = path.join(testHome, 'harness', 'profiles', 'web')
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(
+      path.join(profileDir, 'cordis.patch.yml'),
+      [
+        '- id: llm-deepseek',
+        '  name: "@deepseek-ai/dsh-llm-deepseek-api-key"',
+        '  config:',
+        '    providers:',
+        '      deepseek-official:',
+        '        baseURL: https://api.deepseek.com',
+        '- id: llm-pi-ai',
+        '  name: "@deepseek-ai/dsh-llm-pi-ai"',
+        '  config:',
+        '    providers:',
+        '      zai:',
+        '        baseURL: https://api.z.ai/api/coding/paas/v4',
+        '        apiKeyEnv: ZAI_API_KEY',
+        ''
+      ].join('\n')
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response('{"success":true,"code":200,"data":{"limits":[{"type":"TOKENS_LIMIT","percentage":3}]}}', { status: 200 })))
+    )
+    _resetCache()
+    process.env.ZAI_API_KEY = 'test-key'
+    const snapshot = (await getSnapshot()) as { status: string; providers: string[] }
+    expect(snapshot.status).toBe('ok')
+    expect(snapshot.providers).toEqual(['zai'])
+  })
+
+  it('reads the provider from settings.yaml.imported when the legacy file is gone', async () => {
+    const profileDir = path.join(testHome, 'harness', 'profiles', 'web')
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(
+      path.join(testHome, 'harness', 'settings.yaml.imported'),
+      'llm-pi-ai:\n  providers:\n    zai:\n      baseURL: https://api.z.ai/api/coding/paas/v4\n      apiKeyEnv: ZAI_API_KEY\n'
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response('{"success":true,"code":200,"data":{"limits":[{"type":"TOKENS_LIMIT","percentage":3}]}}', { status: 200 })))
+    )
+    _resetCache()
+    process.env.ZAI_API_KEY = 'test-key'
+    const snapshot = (await getSnapshot()) as { status: string }
+    expect(snapshot.status).toBe('ok')
   })
 
   it('surfaces network errors as error snapshots instead of throwing', async () => {

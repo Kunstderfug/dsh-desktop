@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { app, ipcMain } from 'electron'
 import { parse } from 'yaml'
 
@@ -13,9 +13,12 @@ import { parse } from 'yaml'
  * the progress the chat status line and the statistics sheet surface.
  *
  * The desktop reads the provider's `apiKeyEnv` indirection from the Harness
- * `settings.yaml` instead of duplicating provider configuration: whichever
+ * provider configuration instead of duplicating provider setup: whichever
  * provider entry points at api.z.ai or open.bigmodel.cn donates its host and
- * its key environment variable. The key itself never crosses the IPC boundary;
+ * its key environment variable. Layouts are tried in age order — the legacy
+ * `settings.yaml`, its post-migration `settings.yaml.imported` rename, and the
+ * Harness 0.10 per-profile `cordis.patch.yml` layer. The key itself never
+ * crosses the IPC boundary;
  * the snapshot names the provisioning route ids that use those hosts so the
  * renderer can scope the quota surfaces to sessions running a GLM route.
  */
@@ -64,30 +67,88 @@ async function readHarnessProvider(): Promise<{
 } | null> {
   let provider: ProviderSettings | null = null
   const providers: string[] = []
-  try {
-    const settings = parse(
-      await readFile(join(app.getPath('userData'), 'harness', 'settings.yaml'), 'utf8')
-    ) as {
-      providers?: Record<string, ProviderSettings>
-      'llm-pi-ai'?: { providers?: Record<string, ProviderSettings> }
-    }
-    // The active provider table lives under the llm-pi-ai plugin section;
-    // older installs kept it at the top level.
-    const tables = [settings['llm-pi-ai']?.providers, settings.providers]
-    for (const table of tables) {
-      for (const [route, candidate] of Object.entries(table ?? {})) {
-        const base = candidate?.baseURL ?? ''
-        if (KNOWN_QUOTA_HOSTS.some((host) => base.includes(host))) {
-          // The first entry keeps today's precedence for origin and key; every
-          // matching route is still published so the renderer can recognise any
-          // of them as a GLM session.
-          provider ??= candidate
-          if (!providers.includes(route)) providers.push(route)
-        }
+  // Returns the first GLM candidate in the table and records every matching
+  // route id; keeps all assignment to `provider` on direct assignment paths so
+  // the flow analysis below stays sound.
+  const pick = (
+    table: Record<string, ProviderSettings> | undefined
+  ): ProviderSettings | null => {
+    let first: ProviderSettings | null = null
+    for (const [route, candidate] of Object.entries(table ?? {})) {
+      const base = candidate?.baseURL ?? ''
+      if (KNOWN_QUOTA_HOSTS.some((host) => base.includes(host))) {
+        // The first entry keeps today's precedence for origin and key; every
+        // matching route is still published so the renderer can recognise any
+        // of them as a GLM session.
+        first ??= candidate
+        if (!providers.includes(route)) providers.push(route)
       }
     }
-  } catch {
-    return null
+    return first
+  }
+  // Harness 0.10 moved provider configuration out of the single settings.yaml:
+  // the settings plugin imports that file once into per-plugin Cordis config
+  // (profiles/<name>/cordis.patch.yml) and renames the original to
+  // settings.yaml.imported. Read every historical layout so the indicator
+  // survives the migration; each read is best-effort.
+  const readTable = async (
+    ...segments: string[]
+  ): Promise<{
+    providers?: Record<string, ProviderSettings>
+    'llm-pi-ai'?: { providers?: Record<string, ProviderSettings> }
+  } | null> => {
+    try {
+      return parse(await readFile(join(app.getPath('userData'), ...segments), 'utf8')) as {
+        providers?: Record<string, ProviderSettings>
+        'llm-pi-ai'?: { providers?: Record<string, ProviderSettings> }
+      }
+    } catch {
+      return null
+    }
+  }
+  for (const name of ['settings.yaml', 'settings.yaml.imported']) {
+    const settings = await readTable('harness', name)
+    // The active provider table lives under the llm-pi-ai plugin section;
+    // older installs kept it at the top level.
+    const found =
+      pick(settings?.['llm-pi-ai']?.providers) ?? pick(settings?.providers)
+    if (found !== null) {
+      provider = found
+      break
+    }
+  }
+  if (provider === null) {
+    // The migrated layer: each profile's cordis.patch.yml is a top-level array
+    // of loader entries; the provider table sits under the llm-pi-ai entry's
+    // config. Scan profiles instead of hardcoding the active profile name — a
+    // miss here only leaves the pill hidden, never blocks startup.
+    try {
+      const profilesDir = join(app.getPath('userData'), 'harness', 'profiles')
+      for (const profile of await readdir(profilesDir)) {
+        let entries: unknown
+        try {
+          entries = parse(await readFile(join(profilesDir, profile, 'cordis.patch.yml'), 'utf8'))
+        } catch {
+          continue
+        }
+        if (!Array.isArray(entries)) continue
+        for (const entry of entries) {
+          const candidate = entry as {
+            id?: unknown
+            config?: { providers?: Record<string, ProviderSettings> }
+          }
+          if (candidate?.id !== 'llm-pi-ai') continue
+          const found = pick(candidate.config?.providers)
+          if (found !== null) {
+            provider = found
+            break
+          }
+        }
+        if (provider !== null) break
+      }
+    } catch {
+      // no profiles directory — fall through to no-key
+    }
   }
   if (provider === null) return null
   let origin: string
