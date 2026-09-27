@@ -42,7 +42,12 @@ describe('PPT source build contract', () => {
   it('packages the current staged directories instead of node_modules links', async () => {
     const manifest = JSON.parse(await readFile(path.join(projectRoot, 'package.json'), 'utf8'))
     const files = manifest.build.files
-    expect(manifest.build.afterPack).toBe('scripts/verify-packaged-ppt-runtime.cjs')
+    // The merge chains both afterPack hooks (fork darwin Node cleanup +
+    // upstream PPT-runtime verification) because electron-builder accepts a
+    // single afterPack entry; the chain preserves the verification.
+    expect(manifest.build.afterPack).toBe('scripts/after-pack-chain.cjs')
+    expect(await readFile(path.join(projectRoot, 'scripts/after-pack-chain.cjs'), 'utf8'))
+      .toContain('verify-packaged-ppt-runtime.cjs')
     expect(files).toContain('!node_modules/dsh-ppt{,/**}')
     expect(files).toContain('!node_modules/dsh-ppt-composer{,/**}')
     expect(files).toContainEqual(expect.objectContaining({

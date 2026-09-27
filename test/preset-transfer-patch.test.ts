@@ -593,8 +593,14 @@ describe('agent preset package transfer', () => {
       patchPath('@deepseek-ai/dsh-client-ui-agent-preset'),
       'utf8'
     )
-    expect(patch).not.toContain('AgentPresetSection_module_css_default =')
-    expect(patch).not.toContain('const css$')
+    // Check added/removed lines only: untouched upstream constants may still
+    // appear as diff context, and the seat styles append to the same style
+    // tag without rewriting the upstream css$2 constant.
+    const changedLines = patch
+      .split('\n')
+      .filter(line => /^[+-]/.test(line) && !/^(---|\+\+\+)/.test(line))
+    expect(changedLines.some(line => line.includes('AgentPresetSection_module_css_default ='))).toBe(false)
+    expect(changedLines.some(line => line.includes('const css$'))).toBe(false)
   })
 
   it('keeps a large mode roster searchable, grouped, compact, and connected to Awesome Presets', async () => {

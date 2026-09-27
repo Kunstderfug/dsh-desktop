@@ -41,7 +41,9 @@ describe('workspace session unread markers', () => {
       readFile(patchPath('@deepseek-ai/dsh-client-ui-workspace'), 'utf8')
     ])
     expect(workspace).toContain('onContextMenu: (event) =>')
-    expect(workspace).toContain('if (!row.blank) setMenuOpen(true)')
+    // The fork's draft rows stay right-clickable: the ported workspace patch
+    // delivers isDraft into this handler, so the gate admits drafts too.
+    expect(workspace).toContain('if (!row.blank || isDraft) setMenuOpen(true)')
     expect(workspace).toContain('unread: unreadSessionIds.includes(node.id)')
     expect(workspace).toContain('onUnreadChange')
     expect(desktop).toContain("id: 'desktop-unread-session'")
