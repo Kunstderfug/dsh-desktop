@@ -226,7 +226,10 @@ describe('DSH Desktop model selection reconciliation wiring', () => {
       () => true,
       {
         store: catalogStore,
-        load: async () => catalogStore.getSnapshot().value
+        load: async () => catalogStore.getSnapshot().value,
+        // 0.1.7 resolves the effort catalog through the shared reasoning
+        // service; the reconciliation under test does not depend on it.
+        reasoningFor: () => undefined
       },
       {
         getSnapshot: () => (options.selected === null ? undefined : { next: options.selected }),
