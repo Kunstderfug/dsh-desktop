@@ -354,7 +354,10 @@ describe('multitask_researcher_gate launch while task A runs', () => {
     expect(typeof researching.childId).toBe('string')
     expect(researching.label).toBe(RESEARCHER_LABEL)
 
-    const children = await f.ctx.subagents.listChildren(agent.id)
+    // 0.1.7: listChildren returns pure catalog rows; live lineage entries
+    // (kind/activity/depth) live on listDescendants.
+    const children = (await f.ctx.subagents.listDescendants(agent.id))
+      .filter(entry => entry.kind === 'child' && entry.depth === 1)
     expect(children).toHaveLength(1)
     expect(children[0]).toMatchObject({
       kind: 'child',
