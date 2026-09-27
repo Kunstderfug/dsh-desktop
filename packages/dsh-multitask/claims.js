@@ -542,8 +542,6 @@ function defineListFileClaims(ctx, service) {
   })
 }
 
-const attachedAgents = new WeakSet()
-
 function claimsSessionOrNull(ctx, agent) {
   try {
     return resolveClaimsSession(ctx, agent)
@@ -553,8 +551,13 @@ function claimsSessionOrNull(ctx, agent) {
 }
 
 function attachClaimTools(ctx, service, agent) {
-  if (attachedAgents.has(agent) || claimsSessionOrNull(ctx, agent) === undefined) return
-  attachedAgents.add(agent)
+  if (claimsSessionOrNull(ctx, agent) === undefined) return
+  // Visibility, not a seen-set: 0.1.7 rebuilds agent effect scopes across
+  // turns, so a one-shot guard would strand later requests without the tools.
+  // Use the injected runtime; touching `ctx.tools` from an event listener
+  // throws `cannot get property "tools" without inject` under 0.1.7 cordis.
+  const tools = ctx.get?.('tools')
+  if (typeof tools?.get === 'function' && tools.get('claim_files', agent) !== undefined) return
   agent.ctx.tools.register(defineClaimFiles(ctx, service))
   agent.ctx.tools.register(defineReleaseFiles(ctx, service))
   agent.ctx.tools.register(defineListFileClaims(ctx, service))
@@ -603,6 +606,14 @@ export function registerClaims(ctx) {
     if (event.type !== 'multitask/task') return
     const agent = ctx.get?.('agents')?.get(session.id)
     if (agent !== undefined) attachClaimTools(ctx, service, agent)
+  })
+  // 0.1.7: agent-scoped effect scopes are rebuilt across turns, so a claim
+  // registration made for an earlier turn can disappear before the next
+  // request assembles. Re-check right before each step: visibility makes this
+  // a no-op while the registration is alive.
+  ctx.on?.('agent/pre-step', async ({ agent }, next) => {
+    attachClaimTools(ctx, service, agent)
+    return next()
   })
   ctx.on?.('agent/created', ({ agent }) => {
     attachClaimTools(ctx, service, agent)

@@ -263,10 +263,10 @@ function inToolFollowup(request: GenerateOptions): boolean {
 }
 
 function isResearcherCall(call: ScriptedCall): boolean {
-  const text = userText(call.request)
-  return text.includes('do not modify files')
-    || text.includes('Recommended claim set')
-    || text.includes('structured research report')
+  // 0.1.7 delivers child reports into the parent request history, so the
+  // report headings alone no longer identify the child; the persona brief
+  // only ever appears on a researcher child's own request.
+  return userText(call.request).includes('You are the multitask researcher.')
 }
 
 function isParentCall(call: ScriptedCall): boolean {
