@@ -31,7 +31,11 @@ interface ModelSelectionHelpers {
     sessions: { selectModel(request: Selection & { sessionId: string }): Promise<{ ok: boolean }> },
     sessionId: string,
     available: () => boolean,
-    catalog: { store: SnapshotStore; load(): Promise<unknown> },
+    catalog: {
+      store: SnapshotStore
+      load(): Promise<unknown>
+      reasoningFor(selection: unknown): { efforts: Array<{ id: string; name: string }>; defaultEffort?: string } | undefined
+    },
     projected: { getSnapshot(): unknown; subscribe(listener: () => void): () => void }
   ) => {
     store: {
