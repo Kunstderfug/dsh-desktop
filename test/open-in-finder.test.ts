@@ -22,8 +22,13 @@ describe('workspace Open in file manager integration', () => {
       if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MenuItemButton }
       throw new Error(`Unexpected dependency ${name}`)
     })
+    // Harness 0.1.7 client scopes keep cordis' deferred `inject`; the fork's
+    // ⌘N/⌘O accelerator block needs it, so provide a no-op uiWorkspace scope.
     plugin.apply({
       effect: vi.fn(),
+      inject: (_services: string[], callback: (scope: Record<string, unknown>) => void) => {
+        callback({ uiWorkspace: { startSession: vi.fn() } })
+      },
       slots: {
         inject: (_name: string, callback: () => unknown) => callback(),
         register: (config: (typeof registrations)[number]['config'], component: (props: Record<string, unknown>) => unknown) => {

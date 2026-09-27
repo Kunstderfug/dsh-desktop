@@ -84,7 +84,16 @@ describe('DSH Desktop client slot occupants', () => {
         return () => undefined
       }
     }
-    plugin.apply({ slots, effect: (setup: () => (() => void) | undefined) => { disposeStyle = setup() } })
+    // Harness 0.1.7 client scopes keep cordis' deferred `inject`; the fork's
+    // ⌘N/⌘O accelerator block relies on it, so the stub resolves uiWorkspace
+    // eagerly and the block no-ops without the preload bridge.
+    plugin.apply({
+      slots,
+      inject: (services: string[], callback: (scope: Record<string, unknown>) => void) => {
+        callback({ uiWorkspace: { startSession: vi.fn() } })
+      },
+      effect: (setup: () => (() => void) | undefined) => { disposeStyle = setup() }
+    })
 
     expect(plugin.inject).toEqual(['slots', 'remote.session', 'sessions', 'uiWorkspace'])
     expect(registrations.map(({ config }) => config.name)).toEqual([
