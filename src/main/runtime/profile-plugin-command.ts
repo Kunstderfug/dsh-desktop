@@ -194,7 +194,9 @@ export function buildProfilePluginCommandEnvironment(
   delete result.ELECTRON_RUN_AS_NODE
   // The direct spawn below runs the Electron binary in Node mode on macOS;
   // restore the declaration the delete above stripped from the parent block.
-  if (needsElectronRunAsNode()) result.ELECTRON_RUN_AS_NODE = '1'
+  // Keyed off the spawn platform (which defaults to the current one), so a
+  // caller targeting another platform never inherits the darwin declaration.
+  if (platform === 'darwin' && needsElectronRunAsNode()) result.ELECTRON_RUN_AS_NODE = '1'
 
   // The spread above keeps only the casing the OS block actually stores —
   // even for `process.env`, whose case-insensitivity does not survive a
