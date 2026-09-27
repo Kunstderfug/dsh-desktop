@@ -62,9 +62,10 @@ function activationNarration(taskId) {
   const text = `Multitask task ${taskId} handed off; you are the orchestrator.`
   return createUserMessage({
     content: [{ type: 'text', text }],
+    // 0.1.7 v4 session format refuses the retired `kind: 'plugin'` wrapper;
+    // emit a producer-owned source kind like the rest of this plugin.
     source: {
-      kind: 'plugin',
-      plugin: 'dsh-multitask',
+      kind: 'multitask',
       form: 'notice',
       summary: text
     }
