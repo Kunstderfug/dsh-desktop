@@ -200,7 +200,9 @@ describe('scratch debug plugin (real harness + real command registry, scripted m
     expect(recorded).toHaveLength(1)
     const { childId, handoffText, promptText } = recorded[0]!
     expect(promptText).toBe('research the multitask runtime seam')
-    const children = await f.ctx.subagents.listChildren(parent.id)
+    // 0.1.7: lineage entries (kind/activity/depth) live on listDescendants.
+    const children = (await f.ctx.subagents.listDescendants(parent.id))
+      .filter(entry => entry.kind === 'child' && entry.depth === 1)
     expect(children).toHaveLength(1)
     expect(children[0]).toMatchObject({ kind: 'child', id: childId, mode: 'continuable', label: scratchPlugin.CHILD_LABEL })
 

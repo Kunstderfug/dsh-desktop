@@ -320,7 +320,10 @@ describe('multitask runtime spike (real harness, scripted model)', () => {
     // researcher route), then settled: its activation ended and the durable
     // catalog lists it under the parent.
     await waitFor(() => f.ctx.agents.get(start.childId) === undefined, 'child activation to settle')
-    const children = await f.ctx.subagents.listChildren(parent.id)
+    // 0.1.7: listChildren returns pure catalog rows; live lineage entries
+    // (kind/activity/depth) live on listDescendants.
+    const children = (await f.ctx.subagents.listDescendants(parent.id))
+      .filter(entry => entry.kind === 'child' && entry.depth === 1)
     expect(children).toHaveLength(1)
     const child = children[0]
     expect(child).toMatchObject({ kind: 'child', id: start.childId, mode: 'continuable', label: 'spike researcher' })
@@ -564,7 +567,9 @@ describe('multitask runtime spike (real harness, scripted model)', () => {
     expect(parent2.inbox.nextStep.some(message => message.source.kind === 'subagent-settled' && settledSource(message).senderSessionId === childId)).toBe(true)
 
     // The child is durably discoverable without loading it.
-    const children = await f2.ctx.subagents.listChildren(SessionId('parent-1'))
+    // 0.1.7: lineage entries (kind/activity/depth) live on listDescendants.
+    const children = (await f2.ctx.subagents.listDescendants(SessionId('parent-1')))
+      .filter(entry => entry.kind === 'child' && entry.depth === 1)
     expect(children).toHaveLength(1)
     expect(children[0]).toMatchObject({ kind: 'child', id: childId, mode: 'continuable', label: 'spike researcher' })
     expect(children[0]).property('activity', 'inactive')
