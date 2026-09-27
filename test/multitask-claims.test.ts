@@ -428,7 +428,7 @@ describe('multitask_claims_registry_gate lifecycle and expiry', () => {
     await runTool(f.ctx, childA, 'claim_files', { paths: ['src/live.ts'], taskId: 'MT-1' })
     await f.ctx.subagents.drainContinuableChildren(parent, [SessionId(childIds[1]!)])
     await waitFor(async () => {
-      const children = await f.ctx.subagents.listChildren(parent.id)
+      const children = await f.ctx.subagents.listDescendants(parent.id)
       const dead = children.find(entry => entry.kind === 'child' && entry.id === childIds[1])
       return dead?.kind === 'child' && dead.activity !== 'running'
     }, 'drained child is not running')
@@ -438,7 +438,7 @@ describe('multitask_claims_registry_gate lifecycle and expiry', () => {
     expect(table.some(claim => claim.path === 'src/a.ts' && claim.taskId === 'MT-2')).toBe(false)
     expect(table.some(claim => claim.path === 'src/live.ts' && claim.taskId === 'MT-1')).toBe(true)
 
-    const liveChildren = await f.ctx.subagents.listChildren(parent.id)
+    const liveChildren = await f.ctx.subagents.listDescendants(parent.id)
     const live = liveChildren.find(entry => entry.kind === 'child' && entry.id === childIds[0])
     expect(live?.kind === 'child' && live.activity === 'running').toBe(true)
 
@@ -486,7 +486,7 @@ describe('multitask_claims_registry_gate restart publication', () => {
     cleanups.push(() => handle.dispose())
     const parent2 = handle.agent
 
-    const children = await f2.ctx.subagents.listChildren(SessionId('session-1'))
+    const children = await f2.ctx.subagents.listDescendants(SessionId('session-1'))
     expect(children.some(entry => entry.kind === 'child' && entry.activity === 'inactive')).toBe(true)
     expect(f2.ctx.agents.get(SessionId('session-1'))).toBeDefined()
 

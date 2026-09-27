@@ -406,7 +406,9 @@ function systemMessages(agent: Agent): string {
     .snapshotEvents()
     .filter(event => event.type === 'system/message')
     .map(event => {
-      const message = (event.data as { message?: { content?: Array<{ type?: string, text?: string }> } }).message
+      // 0.1.7 SystemMessage.content is a readonly ContentBlock[]; mirror that
+      // shape instead of asserting a mutable array type.
+      const message = (event.data as { message?: { content?: readonly { type?: string, text?: string }[] } }).message
       return (message?.content ?? []).map(block => block.type === 'text' ? block.text ?? '' : '').join('')
     })
     .join('\n')
