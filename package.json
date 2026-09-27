@@ -333,7 +333,7 @@
       "output": "dist",
       "buildResources": "build"
     },
-    "afterPack": "scripts/after-pack.cjs",
+    "afterPack": "scripts/after-pack-chain.cjs",
     "files": [
       "out/**/*",
       "node_modules/**/*",
@@ -494,8 +494,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
-    },
-    "afterPack": "scripts/verify-packaged-ppt-runtime.cjs"
+    }
   },
   "allowScripts": {
     "electron-winstaller": true,
