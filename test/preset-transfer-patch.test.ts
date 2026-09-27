@@ -594,13 +594,20 @@ describe('agent preset package transfer', () => {
       'utf8'
     )
     // Check added/removed lines only: untouched upstream constants may still
-    // appear as diff context, and the seat styles append to the same style
-    // tag without rewriting the upstream css$2 constant.
+    // appear as diff context. The AgentPresetSection class map must never be
+    // redefined — preset transfer's import surface reuses those hashed names.
+    // The AgentPresetSeat css line is the chip feature's own surface: the fork
+    // extends rules in place while keeping every upstream class name.
     const changedLines = patch
       .split('\n')
       .filter(line => /^[+-]/.test(line) && !/^(---|\+\+\+)/.test(line))
     expect(changedLines.some(line => line.includes('AgentPresetSection_module_css_default ='))).toBe(false)
-    expect(changedLines.some(line => line.includes('const css$'))).toBe(false)
+    // Every upstream class name in the seat map survives the extension.
+    const upstreamSeatNames = ['menuAnchor', 'seat', 'seatIcon', 'seatLabel', 'introIcon', 'introText', 'introChar', 'chevron', 'item', 'itemName', 'itemDesc']
+    const css2Line = changedLines.filter(line => line.includes('const css$2')).join('')
+    for (const name of upstreamSeatNames) {
+      expect(css2Line).toContain(`.cubgiG_${name}{`)
+    }
   })
 
   it('keeps a large mode roster searchable, grouped, compact, and connected to Awesome Presets', async () => {
