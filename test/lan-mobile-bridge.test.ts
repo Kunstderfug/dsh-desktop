@@ -1076,21 +1076,28 @@ describe('mobile idle efficiency', () => {
     })
     bridges.push(bridge)
     const snapshot = await bridge.start()
-    const pendings = () =>
-      (bridge as unknown as { pendingPairings: Map<string, { expiresAt: number }> }).pendingPairings
+    const pendingPairings = () =>
+      (bridge as unknown as { pendingPairings?: Map<string, unknown> }).pendingPairings
     const reconnectFrom = (address: string) =>
       fetch(`http://127.0.0.1:${snapshot.port}/reconnect`, {
         headers: { 'cf-connecting-ip': address, 'cf-ray': `ray-${address}` }
       })
 
-    // Every scan/retry used to insert an entry nobody removed.
+    // The fork used to bound a `pendingPairings` map here; Harness 0.1.7
+    // replaced the pairing-wait/approval flow with direct LAN cookie pairing
+    // and the tunnel PIN page, so /reconnect records no per-address state at
+    // all and the unbounded accumulation the cap guarded against cannot
+    // happen. Assert the superseding behavior instead.
     for (let i = 1; i <= 24; i++) await reconnectFrom(`203.0.113.${i}`)
-    expect(pendings().size).toBeLessThanOrEqual(16)
+    expect(pendingPairings()).toBeUndefined()
 
-    // Expired entries are purged on the next insert instead of accumulating.
+    // After expiry the reconnect page still renders from the durable PIN and
+    // still records nothing per address.
     now += 5 * 60 * 1000 + 1
-    await reconnectFrom('203.0.114.1')
-    expect(pendings().size).toBe(1)
+    const expired = await reconnectFrom('203.0.114.1')
+    expect(expired.status).toBe(200)
+    expect(await expired.text()).toContain('Reconnect DSH')
+    expect(pendingPairings()).toBeUndefined()
   })
 
   it('ends the session stream once buffered SSE backpressure exceeds the cap', async () => {
