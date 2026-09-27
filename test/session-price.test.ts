@@ -237,16 +237,17 @@ describe('session price in the statistics sheet', () => {
     expect(price).toBeGreaterThan(speed)
   })
 
-  it('carries the pricing and projection in the reproducible dependency patches', async () => {
-    const [chatPatch, meterPatch] = await Promise.all([
-      readFile(patchPath('@deepseek-ai/dsh-client-ui-chat'), 'utf8'),
-      readFile(patchPath('@deepseek-ai/dsh-token-meter'), 'utf8')
-    ])
+  it('carries the pricing in the chat patch and the projection in the native meter', async () => {
+    // Harness 0.1.7 absorbed the durable routeUsage projection natively, so
+    // the fork's 0.1.5 token-meter patch was retired; assert the shipped
+    // meter bundle instead of a patch file.
+    const chatPatch = await readFile(patchPath('@deepseek-ai/dsh-client-ui-chat'), 'utf8')
+    const meterBundleContent = await readFile(meterBundle, 'utf8')
 
     expect(chatPatch).toContain('stats.dialog.price')
     expect(chatPatch).toContain('sessionPrice')
-    expect(meterPatch).toContain('routeUsageProjectionDefinition')
-    expect(meterPatch).toContain('register(routeUsageProjectionDefinition)')
+    expect(meterBundleContent).toContain('routeUsageProjectionDefinition')
+    expect(meterBundleContent).toContain('ctx.sessionProjections.register(routeUsageProjectionDefinition)')
   })
 })
 

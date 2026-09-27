@@ -117,7 +117,7 @@ index 3622a98..51c8247 100644
  			* synchronous-addressability guarantee as {@link ClientSessions.create}:
  			* on resolution the child is catalogued and may be explicitly retained).
 diff --git a/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js b/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
-index 3b8507e..8d84248 100644
+index 3b8507e..7392ffd 100644
 --- a/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
 @@ -5,7 +5,7 @@ import { AssistantStreamAccumulator, ReasoningEffortId, assistantStreamChunks, c
@@ -245,7 +245,23 @@ index 3b8507e..8d84248 100644
  	}
  	agentOptions() {
  		const { provider, model } = this.ctx.agentDefaultModel.currentSelection();
-@@ -766,6 +803,34 @@ var SessionCommandController = class {
+@@ -706,6 +743,15 @@ var SessionCommandController = class {
+ 				workspaceId: workspace.id
+ 			});
+ 		}
++		try {
++			/* Desktop draft persistence: materialize the header immediately so a
++			* created-but-never-prompted session survives restarts and an unsent
++			* draft can keep its row. Without this the session lives only as an
++			* in-memory pending entry that is gone after the process exits. */
++			await this.ctx.sessions.flush(adopted.session);
++		} catch (error) {
++			this.ctx.logger.warn(`session gateway: durable header flush for new session "${sessionId}" failed: ${String(error)}`);
++		}
+ 		const agentPreset = this.agents.presetForSession(adopted.session);
+ 		return {
+ 			sessionId,
+@@ -766,6 +812,34 @@ var SessionCommandController = class {
  			throw new RemoteError("gateway/internal", `failed to rename session "${request.sessionId}": ${String(error)}`, {});
  		}
  	}
@@ -280,7 +296,7 @@ index 3b8507e..8d84248 100644
  	/**
  	* Create a new ordinary Session from an exact event prefix. An explicit
  	* `atSeq` is the inclusive cut; an omitted value selects the latest
-@@ -807,7 +872,7 @@ var SessionCommandController = class {
+@@ -807,7 +881,7 @@ var SessionCommandController = class {
  			const composition = await this.agents.composeAgent(this.agents.presetForObservation(source));
  			try {
  				const { provider, model } = this.ctx.agentDefaultModel.currentSelection();
@@ -289,7 +305,7 @@ index 3b8507e..8d84248 100644
  					sessionId: childId,
  					seed,
  					inheritedEventCount: SessionLogOffset(boundary + 1),
-@@ -823,6 +888,7 @@ var SessionCommandController = class {
+@@ -823,6 +897,7 @@ var SessionCommandController = class {
  					},
  					setup: composition.setup
  				});
@@ -297,7 +313,7 @@ index 3b8507e..8d84248 100644
  			} catch (error) {
  				throw new RemoteError("gateway/internal", `failed to fork session "${request.sessionId}": ${String(error)}`, {});
  			}
-@@ -1124,6 +1190,126 @@ function referencedImage(events, attachmentId) {
+@@ -1124,6 +1199,126 @@ function referencedImage(events, attachmentId) {
  		if (found !== void 0) return found;
  	}
  }
@@ -424,7 +440,7 @@ index 3b8507e..8d84248 100644
  //#endregion
  //#region lib/types/control.js
  /** Live Session projection state with reconnect baselines. */
-@@ -2401,6 +2587,171 @@ const SessionMediaReferences = {
+@@ -2401,6 +2596,171 @@ const SessionMediaReferences = {
  		}), "session-controller: /api/file");
  	}
  };
@@ -596,7 +612,7 @@ index 3b8507e..8d84248 100644
  //#endregion
  //#region lib/types/archived-session-gate.js
  /**
-@@ -2566,6 +2917,7 @@ let SessionController = (() => {
+@@ -2566,6 +2926,7 @@ let SessionController = (() => {
  	let _openWorkspacePath_decorators;
  	let _workspacePathApplications_decorators;
  	let _rename_decorators;
@@ -604,7 +620,7 @@ index 3b8507e..8d84248 100644
  	let _fork_decorators;
  	let _prompt_decorators;
  	let _attachment_decorators;
-@@ -2588,6 +2940,7 @@ let SessionController = (() => {
+@@ -2588,6 +2949,7 @@ let SessionController = (() => {
  			_openWorkspacePath_decorators = [Remote("openWorkspacePath")];
  			_workspacePathApplications_decorators = [Remote("workspacePathApplications")];
  			_rename_decorators = [Remote("rename")];
@@ -612,7 +628,7 @@ index 3b8507e..8d84248 100644
  			_fork_decorators = [Remote("fork")];
  			_prompt_decorators = [Remote("prompt")];
  			_attachment_decorators = [Remote("attachment")];
-@@ -2707,6 +3060,17 @@ let SessionController = (() => {
+@@ -2707,6 +3069,17 @@ let SessionController = (() => {
  				},
  				metadata: _metadata
  			}, null, _instanceExtraInitializers);
@@ -630,7 +646,7 @@ index 3b8507e..8d84248 100644
  			__esDecorate(this, null, _fork_decorators, {
  				kind: "method",
  				name: "fork",
-@@ -2868,10 +3232,12 @@ let SessionController = (() => {
+@@ -2868,10 +3241,12 @@ let SessionController = (() => {
  			this.canOpenPath = internals.canOpenPath ?? (() => config.nativeOpen ?? (internals.openPath !== void 0 || canOpenNativePath()));
  			ctx.plugin(SessionFileReferences);
  			ctx.plugin(SessionMediaReferences);
@@ -644,7 +660,7 @@ index 3b8507e..8d84248 100644
  			});
  			ctx.on("session/disposed", (session) => {
  				ctx.emit("api-session/removed", session.id);
-@@ -3077,6 +3443,10 @@ let SessionController = (() => {
+@@ -3077,6 +3452,10 @@ let SessionController = (() => {
  		rename(request) {
  			return this.commands.rename(request);
  		}

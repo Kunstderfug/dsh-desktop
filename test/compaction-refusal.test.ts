@@ -99,13 +99,16 @@ describe('DSH Desktop manual compaction refusals', () => {
     expect(matches('manual compaction: the session already has an open turn')).toBe(false)
   })
 
-  it('carries both refusals in the reproducible dependency patches', async () => {
+  it('carries both refusals: compaction patch plus the native command classifier', async () => {
     const compactionPatch = await readFile(patchPath('@deepseek-ai/dsh-compaction-basic'), 'utf8')
-    const commandPatch = await readFile(patchPath('@deepseek-ai/dsh-command-compact'), 'utf8')
+    // The command-compact agent-busy classification was absorbed natively in
+    // Harness 0.1.7 (expectedFailure extracted and exported upstream), so the
+    // fork's stale 0.1.5 patch is gone; assert the shipped bundle instead.
+    const commandBundle = await readFile(commandCompact, 'utf8')
 
     expect(compactionPatch).toContain('"agent-busy"')
     expect(compactionPatch).toContain('isAgentWorkingError')
-    expect(commandPatch).toContain('case "agent-busy"')
-    expect(commandPatch).toContain('export { apply, expectedFailure, inject, name };')
+    expect(commandBundle).toContain('case "agent-busy"')
+    expect(commandBundle).toContain('export { apply, expectedFailure, inject, name };')
   })
 })
