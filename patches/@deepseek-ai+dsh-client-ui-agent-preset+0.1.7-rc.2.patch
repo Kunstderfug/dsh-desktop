@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-agent-preset/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-agent-preset/lib/client.js
-index 7f96b5f..fbb8301 100644
+index 7f96b5f..baecaee 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-agent-preset/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-agent-preset/lib/client.js
 @@ -271,6 +271,7 @@ window.__ModuleLoader__.load({
@@ -131,7 +131,7 @@ index 7f96b5f..fbb8301 100644
 +			};
 +			const searchField = (0, react_jsx_runtime.jsxs)("span", {
 +				className: AgentPresetSeat_module_css_default.searchShell,
-+				children: [(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconSearchOutline16, {
++				children: [(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconSearchOutlineMedium, {
 +					size: 16,
 +					className: AgentPresetSeat_module_css_default.searchIcon
 +				}), (0, react_jsx_runtime.jsx)("input", {
@@ -199,7 +199,7 @@ index 7f96b5f..fbb8301 100644
 +					id: AWESOME_PRESETS_ID,
 +					label: (0, react_jsx_runtime.jsxs)("span", {
 +						className: AgentPresetSeat_module_css_default.awesome,
-+						children: [(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconSparkle16, {
++						children: [(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconSparkleMedium, {
 +							size: 16,
 +							className: AgentPresetSeat_module_css_default.awesomeIcon
 +						}), (0, react_jsx_runtime.jsx)("span", {
