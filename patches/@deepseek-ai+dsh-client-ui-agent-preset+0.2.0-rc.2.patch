@@ -1,0 +1,431 @@
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-agent-preset/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-agent-preset/lib/client.js
+index 0000000..1111111 100644
+--- a/node_modules/@deepseek-ai/dsh-client-ui-agent-preset/lib/client.js
++++ b/node_modules/@deepseek-ai/dsh-client-ui-agent-preset/lib/client.js
+@@ -271,6 +271,7 @@
+ 		/** Locale bundles for the agent-preset hero chip, header label, and management section. */
+ 		/** English copy. */
+ 		const en = {
++            desktopImport: "Import", desktopAwesome: "Awesome preset", desktopSearch: "Search presets",
+ 			...guideEn,
+ 			builtInGroup: "Built-in",
+ 			customGroup: "Custom",
+@@ -295,8 +295,14 @@
+ 			close: "Close",
+-			creatorDraft: "Let the agent help me create a preset"
++			creatorDraft: "Let the agent help me create a preset",
++			// Seat menu (desktop): search, recents, and the Awesome footer row.
++			searchPresets: "Search modes…",
++			recentPresets: "Recent",
++			noMatchingPresets: "No matching modes",
++			browseAwesomePresets: "Browse Awesome Presets…"
+ 		};
+ 		/** Simplified Chinese copy. */
+ 		const zh = {
++            desktopImport: "导入", desktopAwesome: "Awesome preset", desktopSearch: "搜索预设",
+ 			...guideZh,
+ 			builtInGroup: "内置",
+ 			customGroup: "自定义",
+@@ -321,4 +336,9 @@
+ 			close: "关闭",
+-			creatorDraft: "让 Agent 帮我创建预设模式"
++			creatorDraft: "让 Agent 帮我创建预设模式",
++			// 座位菜单（桌面端）：搜索、最近使用和 Awesome 页脚行。
++			searchPresets: "搜索模式…",
++			recentPresets: "最近使用",
++			noMatchingPresets: "没有匹配的模式",
++			browseAwesomePresets: "浏览 Awesome Presets…"
+ 		};
+ 		//#endregion
+@@ -375,7 +391,7 @@
+ 		}
+ 		//#endregion
+ 		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-agent-preset/src/client/AgentPresetSeat.module.css.mjs
+-		const css$2 = ".cubgiG_menuAnchor{min-width:54px;max-width:100%}.cubgiG_seat{border-radius:var(--dsw-radius-sm);min-width:0;max-width:min(100%,240px);min-height:28px;color:var(--dsw-alias-label-primary);white-space:nowrap;cursor:pointer;background:0 0;border:none;align-items:center;gap:4px;padding:0 8px;font-size:13px;font-weight:500;line-height:20px;display:inline-flex}.cubgiG_seat:not(:disabled):hover,.cubgiG_seat[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-hover)}.cubgiG_seat:disabled{cursor:default;color:var(--dsw-alias-label-quaternary)}.cubgiG_seatIcon{color:var(--dsw-alias-label-primary);flex:none}.cubgiG_seatLabel{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.cubgiG_introIcon{animation:.15s cubic-bezier(.16,1,.3,1) both cubgiG_seat-icon-in}@keyframes cubgiG_seat-icon-in{0%{opacity:0;transform:scale(.5)}to{opacity:1;transform:scale(1)}}.cubgiG_introText{white-space:pre;display:inline-block}.cubgiG_introChar{white-space:pre;opacity:0;animation:.4s ease-out forwards cubgiG_seat-char-in;display:inline-block}@keyframes cubgiG_seat-char-in{0%{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}@media (prefers-reduced-motion:reduce){.cubgiG_introIcon,.cubgiG_introChar{opacity:1;animation:none}}.cubgiG_chevron{color:var(--dsw-alias-label-caption);flex:none}.cubgiG_item{flex-direction:column;gap:2px;max-width:280px;display:flex}.cubgiG_itemName{color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px}.cubgiG_itemDesc{color:var(--dsw-alias-label-caption);white-space:normal;font-size:12px;line-height:16px}";
++		const css$2 = ".cubgiG_menuAnchor{min-width:54px;max-width:100%}.cubgiG_seat{max-width:min(100%,240px);min-height:28px;color:var(--dsw-alias-label-primary);white-space:nowrap;text-overflow:ellipsis;cursor:pointer;background:0 0;border:1px solid var(--dsw-alias-state-business-primary);border-radius:16px;align-items:center;gap:4px;padding:0 7px;font-size:13px;font-weight:500;line-height:20px;display:inline-flex;overflow:hidden}.cubgiG_seatIcon{color:var(--dsw-alias-label-primary);flex:none}.cubgiG_seatLabel{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.cubgiG_introIcon{animation:.15s cubic-bezier(.16,1,.3,1) both cubgiG_seat-icon-in}.cubgiG_introText{white-space:pre;display:inline-block}.cubgiG_introChar{white-space:pre;opacity:0;animation:.4s ease-out forwards cubgiG_seat-char-in;display:inline-block}.cubgiG_chevron{color:var(--dsw-alias-label-caption);flex:none}.cubgiG_item{box-sizing:border-box;flex-direction:column;gap:1px;width:336px;min-width:0;border-radius:9px;padding:7px 10px;display:flex;transition:background .12s ease,transform .12s ease}.cubgiG_itemName{color:var(--dsw-alias-label-primary);white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font-size:13px;font-weight:500;line-height:19px}.cubgiG_itemDesc{color:var(--dsw-alias-label-tertiary);white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font-size:12px;line-height:17px}.cubgiG_awesome{transition:none}.cubgiG_picker{min-width:360px}.cubgiG_searchShell{box-sizing:border-box;width:100%;height:36px;color:var(--dsw-alias-label-caption);background:var(--dsw-alias-bg-module-platform);border:1px solid var(--dsw-alias-border-l2);border-radius:10px;align-items:center;gap:8px;padding:0 10px;display:flex;transition:border-color .15s ease,box-shadow .15s ease,background .15s ease}.cubgiG_searchIcon{flex:none}.cubgiG_search{min-width:0;width:100%;height:100%;color:var(--dsw-alias-label-primary);background:0 0;border:0;outline:0;padding:0;font:inherit}.cubgiG_groupLabel{width:100%;color:var(--dsw-alias-label-caption);text-transform:none;letter-spacing:.02em;border-top:1px solid var(--dsw-alias-border-l3);padding-top:10px;font-size:11px;font-weight:500;line-height:16px;display:block}.cubgiG_item:hover{background:var(--dsw-alias-interactive-bg-hover)}.cubgiG_selectedItem{background:#4d6bfe12}.cubgiG_selectedItem:hover{background:#4d6bfe1c}.cubgiG_empty{color:var(--dsw-alias-label-caption);text-align:center;padding:20px 8px;display:block}.cubgiG_awesome{box-sizing:border-box;width:336px;color:#3a58c4;background:#3a58c414;border-radius:9px;align-items:center;gap:8px;padding:9px 10px;font-weight:500;display:flex;transition:background .12s ease}.cubgiG_awesome:hover{background:#3a58c424}body[data-ds-dark-theme] .cubgiG_awesome{color:#679efe;background:#679efe1a}body[data-ds-dark-theme] .cubgiG_awesome:hover{background:#679efe2e}.cubgiG_awesomeIcon{flex:none}.cubgiG_awesomeText{flex:1}.cubgiG_awesomeArrow{opacity:.6;font-size:15px}";
+ 		const tagId$2 = "@deepseek-ai/dsh-client-ui-agent-preset/AgentPresetSeat.module.css";
+ 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$2) + "]") === null) {
+ 			const tag = document.createElement("style");
+@@ -385,6 +401,10 @@
+ 			document.head.appendChild(tag);
+ 		}
+ 		var AgentPresetSeat_module_css_default = {
++			"awesome": "cubgiG_awesome",
++			"awesomeArrow": "cubgiG_awesomeArrow",
++			"awesomeIcon": "cubgiG_awesomeIcon",
++			"awesomeText": "cubgiG_awesomeText",
+ 			"chevron": "cubgiG_chevron",
+ 			"introChar": "cubgiG_introChar",
+ 			"introIcon": "cubgiG_introIcon",
+@@ -397,7 +417,14 @@
+ 			"seat-char-in": "cubgiG_seat-char-in",
+ 			"seat-icon-in": "cubgiG_seat-icon-in",
+ 			"seatIcon": "cubgiG_seatIcon",
+-			"seatLabel": "cubgiG_seatLabel"
++			"seatLabel": "cubgiG_seatLabel",
++			"empty": "cubgiG_empty",
++			"groupLabel": "cubgiG_groupLabel",
++			"picker": "cubgiG_picker",
++			"search": "cubgiG_search",
++			"searchIcon": "cubgiG_searchIcon",
++			"searchShell": "cubgiG_searchShell",
++			"selectedItem": "cubgiG_selectedItem"
+ 		};
+ 		//#endregion
+ 		//#region lib/types/client/AgentPresetSeat.js
+@@ -418,6 +445,8 @@
+ 		const INTRO_CHAR_STAGGER_MS = 40;
+ 		const INTRO_TEXT_REVEAL_MS = 200;
+ 		const INTRO_CHAR_FADE_MS = 400;
++		const RECENT_PRESETS_KEY = "dsh-agent-preset-recent";
++		const AWESOME_PRESETS_ID = "__awesome_presets__";
+ 		/** Duration of a selection-refusal banner, including a revision becoming unavailable during a pick. */
+ 		const REFUSAL_HOLD_MS = 8e3;
+ 		/**
+@@ -440,6 +469,15 @@
+ 			const state = useAgentPresetSeat((snapshot) => snapshot);
+ 			const main = useSessionRetainInfo((info) => sessionId === void 0 || (info?.retainedBy.mainView ?? 0) > 0);
+ 			const [open, setOpen] = (0, react.useState)(false);
++			const [query, setQuery] = (0, react.useState)("");
++			const [recentIds, setRecentIds] = (0, react.useState)(() => {
++				try {
++					const value = JSON.parse(window.localStorage.getItem(RECENT_PRESETS_KEY) ?? "[]");
++					return Array.isArray(value) ? value.filter((id) => typeof id === "string").slice(0, 4) : [];
++				} catch {
++					return [];
++				}
++			});
+ 			const toastSeq = (0, react.useRef)(0);
+ 			const [toast, setToast] = (0, react.useState)(null);
+ 			const pickerVisible = (0, react.useRef)(developerTools);
+@@ -488,30 +526,107 @@
+ 					children: character
+ 				}, index))
+ 			}) : label;
++			const normalizedQuery = query.trim().toLocaleLowerCase();
++			const matching = state.options.filter((option) => {
++				if (normalizedQuery === "") return true;
++				const text = presetDisplayText(option, t);
++				return `${text.name} ${text.description ?? ""} ${option.id}`.toLocaleLowerCase().includes(normalizedQuery);
++			});
++			const itemOf = (option) => {
++				const text = presetDisplayText(option, t);
++				return {
++					id: option.id,
++					label: (0, react_jsx_runtime.jsxs)("span", {
++						className: `${AgentPresetSeat_module_css_default.item} ${option.id === state.current ? AgentPresetSeat_module_css_default.selectedItem : ""}`,
++						children: [(0, react_jsx_runtime.jsx)("span", {
++							className: AgentPresetSeat_module_css_default.itemName,
++							children: text.name
++						}), (0, react_jsx_runtime.jsx)("span", {
++							className: AgentPresetSeat_module_css_default.itemDesc,
++							children: text.description ?? t("noDescription")
++						})]
++					})
++				};
++			};
++			const searchField = (0, react_jsx_runtime.jsxs)("span", {
++				className: AgentPresetSeat_module_css_default.searchShell,
++				children: [(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconSearchOutlineMedium, {
++					size: 16,
++					className: AgentPresetSeat_module_css_default.searchIcon
++				}), (0, react_jsx_runtime.jsx)("input", {
++					className: AgentPresetSeat_module_css_default.search,
++					type: "search",
++					value: query,
++					autoFocus: true,
++					placeholder: t("searchPresets"),
++					"aria-label": t("searchPresets"),
++					onChange: (event) => {
++						setQuery(event.currentTarget.value);
++					},
++					onKeyDown: (event) => {
++						event.stopPropagation();
++					}
++				})]
++			});
++			const entries = [{
++				type: "label",
++				id: "preset-search",
++				text: searchField
++			}];
++			const addGroup = (id, title, options) => {
++				if (options.length === 0) return;
++				entries.push({
++					type: "label",
++					id: `${id}-label`,
++					text: (0, react_jsx_runtime.jsx)("span", { className: AgentPresetSeat_module_css_default.groupLabel, children: title })
++				}, ...options.map(itemOf));
++			};
++			const recentOptions = normalizedQuery === "" ? recentIds.map((id) => matching.find((option) => option.id === id)).filter((option) => option !== void 0) : [];
++			const recentSet = new Set(recentOptions.map((option) => option.id));
++			addGroup("recent", t("recentPresets"), recentOptions);
++			addGroup("built-in", t("builtInGroup"), matching.filter((option) => option.trust === "system" && !recentSet.has(option.id)));
++			addGroup("custom", t("customGroup"), matching.filter((option) => option.trust === "user" && !recentSet.has(option.id)));
++			if (matching.length === 0) entries.push({
++				type: "label",
++				id: "preset-empty",
++				text: (0, react_jsx_runtime.jsx)("span", { className: AgentPresetSeat_module_css_default.empty, children: t("noMatchingPresets") })
++			});
+ 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {
+ 				open,
+ 				onClose: () => {
+ 					setOpen(false);
++					setQuery("");
+ 				},
+-				items: state.options.map((option) => {
+-					const text = presetDisplayText(option, t);
+-					return {
+-						id: option.id,
+-						label: (0, react_jsx_runtime.jsxs)("span", {
+-							className: AgentPresetSeat_module_css_default.item,
+-							children: [(0, react_jsx_runtime.jsx)("span", {
+-								className: AgentPresetSeat_module_css_default.itemName,
+-								children: text.name
+-							}), (0, react_jsx_runtime.jsx)("span", {
+-								className: AgentPresetSeat_module_css_default.itemDesc,
+-								children: text.description ?? t("noDescription")
+-							})]
+-						})
+-					};
+-				}),
++				items: entries,
++				footer: [{
++					id: AWESOME_PRESETS_ID,
++					label: (0, react_jsx_runtime.jsxs)("span", {
++						className: AgentPresetSeat_module_css_default.awesome,
++						children: [(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconSparkleMedium, {
++							size: 16,
++							className: AgentPresetSeat_module_css_default.awesomeIcon
++						}), (0, react_jsx_runtime.jsx)("span", {
++							className: AgentPresetSeat_module_css_default.awesomeText,
++							children: t("browseAwesomePresets")
++						}), (0, react_jsx_runtime.jsx)("span", {
++							className: AgentPresetSeat_module_css_default.awesomeArrow,
++							children: "→"
++						})]
++					})
++				}],
+ 				selectedId: state.current,
+ 				onSelect: (id) => {
+ 					setOpen(false);
++					setQuery("");
++					if (id === AWESOME_PRESETS_ID) {
++						window.open("https://www.dshdesktop.com/preset/", "_blank", "noopener,noreferrer");
++						return;
++					}
++					const nextRecent = [id, ...recentIds.filter((recentId) => recentId !== id)].slice(0, 4);
++					setRecentIds(nextRecent);
++					try {
++						window.localStorage.setItem(RECENT_PRESETS_KEY, JSON.stringify(nextRecent));
++					} catch {}
+ 					const picked = state.options.find((option) => option.id === id);
+ 					/* v8 ignore next */
+ 					const name = picked === void 0 ? id : presetDisplayText(picked, t).name;
+@@ -528,8 +643,10 @@
+ 					});
+ 				},
+ 				align: "start",
++				side: "bottom",
+ 				portal: true,
+-				className: AgentPresetSeat_module_css_default.menuAnchor,
++				compact: true,
++				className: `${AgentPresetSeat_module_css_default.menuAnchor} ${AgentPresetSeat_module_css_default.picker}`,
+ 				anchor: (0, react_jsx_runtime.jsxs)("button", {
+ 					type: "button",
+ 					className: AgentPresetSeat_module_css_default.seat,
+@@ -848,6 +850,85 @@
+ 		*/
+ 		function AgentPresetSection({ useAgentPresetSection, load, view, closeView, makeDefault, startCreatorDraft, close: closeSettings, t }) {
+ 			const state = useAgentPresetSection((value) => value);
++			const chinese = document.documentElement.lang?.toLowerCase().startsWith("zh");
++			const copy = chinese ? {
++				import: "导入", export: "导出预设", search: "搜索预设", awesome: "Awesome preset",
++				trust: "自定义预设可以使用与 Agent 相同权限的工具和命令。请只导入可信来源。",
++				rename: "预设 ID", conflict: "该 ID 已存在，请换一个名称。", install: "安装并在重启后启用",
++				restart: "预设已导入。重启 DSH Desktop 后生效。", cancel: "取消"
++			} : {
++				import: "Import", export: "Export preset", search: "Search presets", awesome: "Awesome preset",
++				trust: "Custom presets can run tools and commands with the same permissions as the Agent. Import only from trusted sources.",
++				rename: "Preset ID", conflict: "This ID already exists. Choose another name.", install: "Install and enable after restart",
++				restart: "Preset imported. Restart DSH Desktop to use it.", cancel: "Cancel"
++			};
++			const [search, setSearch] = (0, react.useState)("");
++			const [importFile, setImportFile] = (0, react.useState)(null);
++			const [importDraft, setImportDraft] = (0, react.useState)(null);
++			const [importId, setImportId] = (0, react.useState)("");
++			const [importBusy, setImportBusy] = (0, react.useState)(false);
++			const [transferError, setTransferError] = (0, react.useState)(null);
++			const [transferNotice, setTransferNotice] = (0, react.useState)(null);
++			const importInput = (0, react.useRef)(null);
++			const transferUrl = (id = "", install = false) => {
++				const params = new URLSearchParams();
++				if (id) params.set("agentPreset", id);
++				if (install) params.set("install", "1");
++				const query = params.toString();
++				return `/api/agent-preset.import${query ? `?${query}` : ""}`;
++			};
++			const readTransferError = async (response) => {
++				const body = await response.json().catch(() => ({}));
++				return body.error ?? `HTTP ${response.status}`;
++			};
++			const previewImport = async (file) => {
++				setImportBusy(true);
++				setTransferError(null);
++				try {
++					const response = await fetch(transferUrl(), { method: "POST", headers: { "content-type": "application/vnd.dsh.preset+zip" }, body: file });
++					if (!response.ok) throw new Error(await readTransferError(response));
++					const draft = await response.json();
++					setImportFile(file);
++					setImportDraft(draft);
++					setImportId(draft.agentPreset);
++				} catch (error) {
++					setTransferError(error instanceof Error ? error.message : String(error));
++				} finally {
++					setImportBusy(false);
++				}
++			};
++			const confirmImport = async () => {
++				if (!importFile) return;
++				setImportBusy(true);
++				setTransferError(null);
++				try {
++					const response = await fetch(transferUrl(importId.trim().toLowerCase(), true), { method: "POST", headers: { "content-type": "application/vnd.dsh.preset+zip" }, body: importFile });
++					if (!response.ok) throw new Error(await readTransferError(response));
++					setImportFile(null);
++					setImportDraft(null);
++					setTransferNotice(copy.restart);
++				} catch (error) {
++					setTransferError(error instanceof Error ? error.message : String(error));
++				} finally {
++					setImportBusy(false);
++				}
++			};
++			const exportPreset = async (id) => {
++				setTransferError(null);
++				try {
++					const response = await fetch(`/api/agent-preset.export?agentPreset=${encodeURIComponent(id)}`);
++					if (!response.ok) throw new Error(await readTransferError(response));
++					const url = URL.createObjectURL(await response.blob());
++					try {
++						const anchor = document.createElement("a");
++						anchor.href = url;
++						anchor.download = `${id}.dshpreset`;
++						anchor.click();
++					} finally { setTimeout(() => URL.revokeObjectURL(url), 0); }
++				} catch (error) {
++					setTransferError(error instanceof Error ? error.message : String(error));
++				}
++			};
+ 			const [guide, setGuide] = (0, react.useState)(null);
+ 			const viewTrigger = (0, react.useRef)(null);
+ 			const closeViewOnUnmount = (0, react.useRef)(closeView);
+@@ -881,21 +962,53 @@
+ 			return (0, react_jsx_runtime.jsxs)("section", {
+ 				className: AgentPresetSection_module_css_default.section,
+ 				children: [
+-					(0, react_jsx_runtime.jsx)("h2", {
+-						className: AgentPresetSection_module_css_default.title,
+-						children: t("nav")
+-					}),
++					(0, react_jsx_runtime.jsxs)("div", {
++                        "data-dsh-preset-heading": "",
++                        children: [(0, react_jsx_runtime.jsx)("h2", {
++                            className: AgentPresetSection_module_css_default.title,
++                            children: t("nav")
++                        }), (0, react_jsx_runtime.jsxs)("div", {
++                            "data-dsh-preset-actions": "",
++                            children: [(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
++                                variant: "outline", disabled: importBusy,
++                                icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutlineRegular, { size: 16 }),
++                                onClick: () => importInput.current?.click(), children: t("desktopImport")
++                            }), (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
++                                variant: "outline",
++                                onClick: () => window.open("https://www.dshdesktop.com/preset/", "_blank", "noopener,noreferrer"),
++                                children: t("desktopAwesome")
++                            })]
++                        })]
++                    }),
+ 					(0, react_jsx_runtime.jsx)("p", {
+ 						className: AgentPresetSection_module_css_default.intro,
+ 						children: t("sectionIntro")
+ 					}),
++					(0, react_jsx_runtime.jsxs)("div", {
++						"data-dsh-preset-search": "",
++						children: [
++							(0, react_jsx_runtime.jsx)("input", {
++								type: "search", value: search, placeholder: t("desktopSearch"),
++								"aria-label": t("desktopSearch"), onChange: (event) => setSearch(event.target.value),
++
++							}),
++
++							(0, react_jsx_runtime.jsx)("input", {
++								ref: importInput, type: "file", accept: ".dshpreset,application/zip", style: { display: "none" },
++								onChange: (event) => { const file = event.target.files?.[0]; if (file) void previewImport(file); event.target.value = ""; }
++							})
++						]
++					}),
++					transferError && (0, react_jsx_runtime.jsx)("p", { role: "alert", children: transferError }),
++					transferNotice && (0, react_jsx_runtime.jsx)("p", { role: "status", children: transferNotice }),
+ 					state.error === null ? null : (0, react_jsx_runtime.jsx)("p", {
+ 						className: AgentPresetSection_module_css_default.error,
+ 						role: "alert",
+ 						children: state.error
+ 					}),
+ 					[true, false].map((builtIn) => {
+-						const rows = state.rows.filter((row) => isBuiltInPreset(row) === builtIn);
++						const query = search.trim().toLowerCase();
++						const rows = state.rows.filter((row) => isBuiltInPreset(row) === builtIn && (query === "" || `${row.id} ${presetDisplayText(row, t).name} ${presetDisplayText(row, t).description ?? ""}`.toLowerCase().includes(query)));
+ 						const entry = builtIn ? null : creatorButton;
+ 						if (rows.length === 0 && entry === null) return null;
+ 						return (0, react_jsx_runtime.jsxs)("section", {
+@@ -1003,7 +1116,13 @@
+ 														view(row.id);
+ 													},
+ 													children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconBrowseOutlineRegular, {})
+-												})]
++											}), !builtIn && (0, react_jsx_runtime.jsx)("button", {
++												type: "button",
++												"aria-label": `${copy.export}: ${display.name}`,
++												title: copy.export,
++												onClick: () => { void exportPreset(row.id); },
++												children: copy.export
++											})]
+ 											})]
+ 										}, row.id);
+ 									})
+@@ -1020,6 +1139,34 @@
+ 							setGuide(null);
+ 						}
+ 					}),
++					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
++						open: importDraft !== null,
++						onClose: () => { if (!importBusy) { setImportDraft(null); setImportFile(null); setTransferError(null); } },
++						closeLabel: copy.cancel,
++						title: copy.import,
++						footer: (0, react_jsx_runtime.jsxs)("div", {
++							style: { display: "flex", gap: 8, justifyContent: "flex-end" },
++							children: [
++								(0, react_jsx_runtime.jsx)("button", { type: "button", disabled: importBusy, onClick: () => { setImportDraft(null); setImportFile(null); setTransferError(null); }, children: copy.cancel }),
++								(0, react_jsx_runtime.jsx)("button", {
++									type: "button", disabled: importBusy || !/^[a-z0-9][a-z0-9-]*$/.test(importId.trim().toLowerCase()) || importDraft?.conflict && importId.trim().toLowerCase() === importDraft.agentPreset,
++									onClick: () => { void confirmImport(); }, children: copy.install
++								})
++							]
++						}),
++						children: importDraft === null ? null : (0, react_jsx_runtime.jsxs)("div", {
++							style: { display: "grid", gap: 12 },
++							children: [
++								(0, react_jsx_runtime.jsx)("strong", { children: importDraft.name }),
++								(0, react_jsx_runtime.jsx)("p", { children: `${importDraft.fileCount} files · ${importDraft.sourceDshVersion ?? "unknown version"}` }),
++								(0, react_jsx_runtime.jsx)("p", { children: copy.trust }),
++								importDraft.warnings?.length > 0 && (0, react_jsx_runtime.jsx)("p", { role: "alert", children: importDraft.warnings.join(", ") }),
++								(0, react_jsx_runtime.jsxs)("label", { children: [copy.rename, (0, react_jsx_runtime.jsx)("input", { value: importId, onChange: (event) => setImportId(event.target.value), style: { display: "block", width: "100%" } })] }),
++								importDraft.conflict && importId.trim().toLowerCase() === importDraft.agentPreset && (0, react_jsx_runtime.jsx)("p", { role: "alert", children: copy.conflict }),
++								transferError && (0, react_jsx_runtime.jsx)("p", { role: "alert", children: transferError })
++							]
++						})
++				}),
+ 					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
+ 						open: viewed !== null,
+ 						onClose: closeViewer,
