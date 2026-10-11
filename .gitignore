@@ -41,3 +41,6 @@ docs/mobile-connection-latency.zh.md
 /.build/
 /packages/ppt-runtime/templates/
 /packages/ppt-bundles/
+
+# Local-only main-process bundle experiment at repo root
+/index.js
