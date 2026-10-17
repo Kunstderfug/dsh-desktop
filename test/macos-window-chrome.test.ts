@@ -57,3 +57,25 @@ it('shares sidebar theme ownership across repeated mounts', () => {
   second()
   expect(doc.querySelectorAll('[data-dsh-macos-sidebar-theme]')).toHaveLength(0)
 })
+
+it('turns declared macOS chrome rows into drag surfaces while keeping controls interactive', () => {
+  const doc = document.implementation.createHTMLDocument()
+  const row = doc.createElement('div')
+  row.dataset.windowDrag = 'true'
+  const button = doc.createElement('button')
+  row.append(button)
+  doc.body.append(row)
+
+  const dispose = mountMacosWindowChrome(doc, () => () => {})
+  const style = doc.querySelector<HTMLStyleElement>('[data-dsh-macos-sidebar-theme]')
+  const host = 'html[data-platform="darwin"][data-dsh-desktop-web-shortcuts="true"]'
+  const drag = `${host} [data-window-drag="true"]`
+  const noDrag = `${drag} :is(button, a, input, select, textarea, label, summary, iframe, [role="button"], [role="tab"], [role="combobox"], [role="slider"], [role="menuitem"], [contenteditable]:not([contenteditable="false"]), [tabindex], [data-window-drag="false"])`
+
+  expect(row.matches(drag)).toBe(true)
+  expect(button.matches(noDrag)).toBe(true)
+  expect(style?.textContent).toMatch(/\[data-window-drag="true"\]\s*\{\s*-webkit-app-region: drag;/)
+  expect(style?.textContent).toMatch(/\[data-window-drag="false"\]\s*\)\s*\{\s*-webkit-app-region: no-drag;/)
+
+  dispose()
+})

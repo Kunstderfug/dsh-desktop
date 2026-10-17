@@ -14,9 +14,36 @@ export function mountMacosWindowChrome(
   theme.owners++
   const style = theme.style
   style.dataset.dshMacosSidebarTheme = ''
-  // The Desktop sidebar uses Harness theme colors over the native window material.
-  // This is window chrome: the host owns the transparent macOS BrowserWindow.
-  style.textContent = 'html[data-platform="darwin"][data-dsh-desktop-web-shortcuts="true"] [data-dsh-sidebar-root] { background: var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base, #f8f8f6)); }'
+  // This browser-based host does not load ui-web's desktop base rule. Preserve
+  // Harness's data-window-drag contract here while owning the native window chrome.
+  style.textContent = `
+    html[data-platform="darwin"][data-dsh-desktop-web-shortcuts="true"] [data-dsh-sidebar-root] {
+      background: var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base, #f8f8f6));
+    }
+    html[data-platform="darwin"][data-dsh-desktop-web-shortcuts="true"] [data-window-drag="true"] {
+      -webkit-app-region: drag;
+    }
+    html[data-platform="darwin"][data-dsh-desktop-web-shortcuts="true"] [data-window-drag="true"] :is(
+      button,
+      a,
+      input,
+      select,
+      textarea,
+      label,
+      summary,
+      iframe,
+      [role="button"],
+      [role="tab"],
+      [role="combobox"],
+      [role="slider"],
+      [role="menuitem"],
+      [contenteditable]:not([contenteditable="false"]),
+      [tabindex],
+      [data-window-drag="false"]
+    ) {
+      -webkit-app-region: no-drag;
+    }
+  `
   const mark = (): void => {
     const root = doc.documentElement
     if (!root) return
