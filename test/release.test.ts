@@ -174,6 +174,10 @@ describe('GitHub release contract', () => {
       path.join(projectRoot, 'build', 'windows-hidden-console.mjs'),
       'utf8'
     )
+    const windowsHideConsoleImport = await readFile(
+      path.join(projectRoot, 'build', 'windows-hide-console-import.mjs'),
+      'utf8'
+    )
 
     expect(packageJson.build.artifactName).toBe('dsh-desktop-${os}-${arch}.${ext}')
     expect(packageJson.build.asar).toBe(true)
@@ -202,6 +206,11 @@ describe('GitHub release contract', () => {
     })
     expect(harnessNodeEntry).toContain("from './host-module-fallback.mjs'")
     expect(packageJson.build.extraResources).toContainEqual({
+      from: 'build/packaged-pnpm-invocation.mjs',
+      to: 'packaged-pnpm-invocation.mjs'
+    })
+    expect(harnessNodeEntry).toContain("from './packaged-pnpm-invocation.mjs'")
+    expect(packageJson.build.extraResources).toContainEqual({
       from: 'build/office-engine-resolution.mjs',
       to: 'office-engine-resolution.mjs'
     })
@@ -210,6 +219,12 @@ describe('GitHub release contract', () => {
     expect(packageJson.build.extraResources).toContainEqual({
       from: 'build/windows-child-process-hide.mjs',
       to: 'windows-child-process-hide.mjs'
+    })
+    expect(windowsHideConsoleImport).toContain("await import('./windows-hidden-console.mjs')")
+    expect(windowsHideConsoleImport).toContain('enforceWindowsChildProcessHide')
+    expect(packageJson.build.extraResources).toContainEqual({
+      from: 'build/windows-hide-console-import.mjs',
+      to: 'windows-hide-console-import.mjs'
     })
     expect(packageJson.build.extraResources).toContainEqual({
       from: 'build/splash.html',
@@ -487,6 +502,29 @@ describe('GitHub release contract', () => {
     expect(workflow).toMatch(
       /publish:[\s\S]*?needs\.sign-windows\.result == 'success'[\s\S]*?- sign-windows/
     )
+  })
+
+  it('uses local npm downloads and bounds Node setup on the persistent UKey signer', async () => {
+    const { jobs } = parse(await readFile(path.join(projectRoot, '.github/workflows/release.yml'), 'utf8')) as {
+      jobs: Record<string, {
+        'runs-on'?: string | string[]
+        steps: Array<{ uses?: string; with?: { cache?: string }; 'timeout-minutes'?: number }>
+      }>
+    }
+    const persistentJobs = Object.values(jobs).filter(job =>
+      Array.isArray(job['runs-on']) && job['runs-on'].includes('self-hosted')
+    )
+    expect(persistentJobs).toHaveLength(1)
+    for (const job of persistentJobs) {
+      const setup = job.steps.find(step => step.uses?.startsWith('actions/setup-node@'))
+      expect(setup).toBeDefined()
+      expect(setup?.with?.cache).toBeUndefined()
+      expect(setup?.['timeout-minutes']).toBe(5)
+    }
+    for (const name of ['macos', 'windows-x64']) {
+      const setup = jobs[name]?.steps.find(step => step.uses?.startsWith('actions/setup-node@'))
+      expect(setup?.with?.cache).toBe('npm')
+    }
   })
 
   it('does not change Windows security settings during installation', async () => {
