@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
-index 41a4591..ca0f8f3 100644
+index 41a4591..6565a3e 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
 @@ -349,17 +349,40 @@ window.__ModuleLoader__.load({
@@ -393,8 +393,8 @@ index 41a4591..ca0f8f3 100644
  							ref: titleRef,
 -							className: Rows_module_css_default.title,
 +							className: clsx(Rows_module_css_default.title, isDraft && Rows_module_css_default.draftTitle),
- 							onDoubleClick: row.blank ? void 0 : (e) => {
 +							style: unread ? { fontWeight: 600 } : void 0,
+ 							onDoubleClick: row.blank ? void 0 : (e) => {
  								e.stopPropagation();
  								onRenameRequest(node.id, row.title);
  							},
@@ -403,7 +403,7 @@ index 41a4591..ca0f8f3 100644
 +							isDraft && (0, react_jsx_runtime.jsx)("span", {
 +								className: Rows_module_css_default.draftBadge,
 +								children: t("session.draft")
-+							}],
++							}),
 -						!row.blank && (0, react_jsx_runtime.jsx)("span", {
 +						(!row.blank || isDraft) && (0, react_jsx_runtime.jsx)("span", {
  							className: Rows_module_css_default.time,
