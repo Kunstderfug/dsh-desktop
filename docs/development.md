@@ -88,6 +88,8 @@ When upgrading Harness:
 
 Harness includes architecture-specific native dependencies. Build each installer on the operating system and architecture where it will run.
 
+Local packaging uses the version in `package.json`; merging an upstream release tag does not set the app version. The release workflow sets it from the tag before building. For an intentionally versioned local build, run `npm version <intended-version> --no-git-tag-version --ignore-scripts` first to update both the manifest and lockfile without creating a tag. Check the installed app's About dialog after rebuilding: the updater compares this packaged version with the release feed.
+
 ```bash
 # macOS Apple Silicon, on an Apple Silicon Mac or runner
 npm run package:mac:arm64
