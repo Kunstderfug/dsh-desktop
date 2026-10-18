@@ -155,6 +155,7 @@ import {
 } from './update/update-manager'
 import type { RuntimeSnapshot } from '../shared/contracts'
 import { registerGlmQuotaIpc } from './glm-quota'
+import { registerGitIpc } from './git-ipc'
 import { resolveHarnessLocale } from './application-locale'
 import { installContextMenu } from './context-menu'
 import {
@@ -3304,6 +3305,7 @@ async function bootstrap(): Promise<void> {
   launchDirectory = await ensureLaunchRoot(app.getPath('userData'))
   registerUpdateHandlers({ locale: harnessLocale })
   registerGlmQuotaIpc()
+  registerGitIpc({ assertTrusted: assertTrustedMainWindowEvent })
   nativeTheme.themeSource = harnessThemePreference()
   ensureTray()
   const dshHome = join(app.getPath('userData'), 'harness')

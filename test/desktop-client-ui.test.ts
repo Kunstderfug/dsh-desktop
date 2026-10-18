@@ -6,7 +6,13 @@ import { describe, expect, it, vi } from 'vitest'
 const projectRoot = path.resolve(import.meta.dirname, '..')
 
 interface Registration {
-  config: { name: string; id?: string; order?: number }
+  config: {
+    name: string
+    id?: string
+    order?: number
+    locale?: string
+    inject?: () => Record<string, unknown>
+  }
   component: (props: Record<string, unknown>) => unknown
 }
 
@@ -22,13 +28,14 @@ describe('DSH Desktop client slot occupants', () => {
         inject: string[]
       }
     } | undefined
-    const appended: Array<{ textContent?: string }> = []
+    const appended: Array<{ id?: string; textContent?: string }> = []
     const removeStyle = vi.fn()
-    let disposeStyle: (() => void) | undefined
+    const disposers: Array<() => void> = []
+    const dictionaries = new Map<string, { zh: Record<string, string>; en: Record<string, string> }>()
     const document = {
       getElementById: vi.fn(() => null),
       createElement: vi.fn(() => ({ id: '', dataset: {}, textContent: '', remove: removeStyle })),
-      head: { appendChild: (node: { textContent?: string }) => appended.push(node) }
+      head: { appendChild: (node: { id?: string; textContent?: string }) => appended.push(node) }
     }
     vm.runInNewContext(source, {
       document,
@@ -89,13 +96,25 @@ describe('DSH Desktop client slot occupants', () => {
     // eagerly and the block no-ops without the preload bridge.
     plugin.apply({
       slots,
+      locale: {
+        register: (
+          name: string,
+          value: { zh: Record<string, string>; en: Record<string, string> }
+        ) => {
+          dictionaries.set(name, value)
+          return () => undefined
+        }
+      },
       inject: (services: string[], callback: (scope: Record<string, unknown>) => void) => {
         callback({ uiWorkspace: { startSession: vi.fn() } })
       },
-      effect: (setup: () => (() => void) | undefined) => { disposeStyle = setup() }
+      effect: (setup: () => (() => void) | undefined) => {
+        const dispose = setup()
+        if (typeof dispose === 'function') disposers.push(dispose)
+      }
     })
 
-    expect(plugin.inject).toEqual(['slots', 'remote.session', 'sessions', 'uiWorkspace'])
+    expect(plugin.inject).toEqual(['slots', 'locale', 'remote.session', 'sessions', 'uiWorkspace'])
     expect(registrations.map(({ config }) => config.name)).toEqual([
       'sidebar.brand.mark',
       'sidebar.brand.name',
@@ -103,13 +122,30 @@ describe('DSH Desktop client slot occupants', () => {
       'sidebar.right.tab.document.unpreviewable',
       'sidebar.workspaces.session.menu.item',
       'sidebar.workspaces.session.menu.item',
-      'sidebar.workspaces.session.menu.item'
+      'sidebar.workspaces.session.menu.item',
+      'conversation.input.left'
     ])
     // Desktop toolbar styles have an owned lifetime; branding stays in currentColor.
-    expect(appended).toHaveLength(1)
-    expect(appended[0]?.textContent).toContain("[data-dsh-preset-search]")
-    disposeStyle?.()
-    expect(removeStyle).toHaveBeenCalledOnce()
+    expect(appended).toHaveLength(2)
+    expect(appended[0]?.textContent).toContain(".dgb-trigger")
+    expect(appended[1]?.textContent).toContain("[data-dsh-preset-search]")
+    for (const dispose of disposers) dispose()
+    expect(removeStyle).toHaveBeenCalledTimes(2)
+
+    const gitBranch = registrations.find(
+      ({ config }) => config.name === 'conversation.input.left'
+    )!
+    expect(gitBranch.config.id).toBe('desktop-git-branch')
+    expect(gitBranch.config.order).toBe(10)
+    expect(gitBranch.config.locale).toBe('desktop-git-branch')
+
+    // Every user-visible string ships in both dictionaries; a key missing
+    // from one locale is an unfinished UI, not a fallback.
+    const gitDictionary = dictionaries.get('desktop-git-branch')
+    if (!gitDictionary) throw new Error('Expected desktop-git-branch dictionaries')
+    expect(Object.keys(gitDictionary.zh).sort()).toEqual(Object.keys(gitDictionary.en).sort())
+    for (const value of Object.values(gitDictionary.zh)) expect(value).not.toBe('')
+    for (const value of Object.values(gitDictionary.en)) expect(value).not.toBe('')
 
     const sidebarName = registrations.find(
       ({ config }) => config.name === 'sidebar.brand.name'

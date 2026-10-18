@@ -8,6 +8,11 @@ import { findBootFailureText } from './boot-failure'
 import { markWindowsTitlebar, mountWindowsTitlebarLayout } from './windows-titlebar'
 import { mountMacosWindowChrome } from './macos-window-chrome'
 import { createHostPathsBridge, HOST_PATHS_BRIDGE } from './host-paths'
+import type {
+  GitBranchesResult,
+  GitBranchResult,
+  GitRepositoryState
+} from '../shared/git-contracts'
 
 if (process.platform === 'darwin') {
   const dispose = mountMacosWindowChrome(document, listener => {
@@ -577,7 +582,13 @@ contextBridge.exposeInMainWorld(
     setBuiltInImageGenerationEnabled: (enabled: boolean): Promise<{ ok: boolean; enabled?: boolean; restartRequired?: boolean; reason?: string }> =>
       ipcRenderer.invoke('desktop-host-plugin:set-enabled', enabled),
     uninstallMarket: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('market:uninstall'),
-    openInFinder: (path: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('harness:open-in-finder', path)
+    openInFinder: (path: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('harness:open-in-finder', path),
+    gitRepositoryState: (path: string): Promise<GitRepositoryState> => ipcRenderer.invoke('git:state', path),
+    gitListBranches: (path: string): Promise<GitBranchesResult> => ipcRenderer.invoke('git:branches', path),
+    gitSwitchBranch: (path: string, branch: string): Promise<GitBranchResult> =>
+      ipcRenderer.invoke('git:switch', path, branch),
+    gitCreateBranch: (path: string, branch: string): Promise<GitBranchResult> =>
+      ipcRenderer.invoke('git:create', path, branch)
   })
 )
 
