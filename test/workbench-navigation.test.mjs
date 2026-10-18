@@ -10,11 +10,20 @@ const source = await readFile(new URL('../node_modules/@deepseek-ai/dsh-client-u
 const workbenchSource = await readFile(new URL('../packages/dsh-desktop-workbenches/client.js', import.meta.url), 'utf8')
 const classStart = source.indexOf('class extends', source.indexOf('var UiWorkspaceService ='))
 const classEnd = source.indexOf('\n\t\t};', classStart) + '\n\t\t};'.length
+// The 0.2.0-rc.2 bundle defines the Session creation helpers immediately before
+// recentWorkspace at module scope (openWorkspace calls them), and the desktop
+// draft-persistence patch adds draftPreviewOf before sessionVisible
+// (reuseOrCreateBlank calls it). The extracted slice must carry all four
+// helpers or the VM throws a ReferenceError.
+const draftStart = source.indexOf('function draftPreviewOf(')
+const visibleStart = source.indexOf('function sessionVisible(', draftStart)
+const helpersStart = source.indexOf('function sessionCreateErrorOf(', classEnd)
 const recentStart = source.indexOf('function recentWorkspace(', classEnd)
 const recentEnd = source.indexOf('\n\t\t//#endregion', recentStart)
-if ([classStart, classEnd, recentStart, recentEnd].some(index => index < 0)) throw new Error('Workspace service extraction failed; check the installed Harness navigation module.')
+if ([classStart, classEnd, draftStart, visibleStart, helpersStart, recentStart, recentEnd].some(index => index < 0)) throw new Error('Workspace service extraction failed; check the installed Harness navigation module.')
 const UiWorkspaceService = vm.runInNewContext(`(() => {
-  ${source.slice(recentStart, recentEnd)}
+  ${source.slice(draftStart, visibleStart)}
+  ${source.slice(helpersStart, recentEnd)}
   return (${source.slice(classStart, classEnd).trim().replace(/;$/, '')})
 })()`, { _deepseek_ai_cordis: { Service: class {} }, AbortController, AbortSignal, console, setTimeout, clearTimeout })
 let apply, Workbenches
@@ -49,6 +58,9 @@ function fixture() {
   service.sessionOpener = null
   service.sessionReuseFilter = null
   service.view = { markSessionRead: vi.fn() }
+  // The 0.2.0-rc.2 service receives the RowToast channel via its constructor;
+  // the prototype-based fixture must provide it for create-failure paths.
+  service.notify = vi.fn()
   service.sessionFilter = null
   service.sessionFilterUnsubscribe = null
   service.workspaceFilter = null

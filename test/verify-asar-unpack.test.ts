@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rmdir, unlink, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,8 +13,23 @@ const { verifyAsarUnpack } = require('../scripts/verify-asar-unpack.cjs') as {
 }
 
 const roots: string[] = []
+
+/** Requiring @electron/asar patches fs so any .asar path virtualizes into a
+ * directory: a recursive rm can descend into the archive and never remove it.
+ * Delete the real tree first, then unlink the archive directly, which passes
+ * through the patch. */
+async function removePackagedApp(root: string): Promise<void> {
+  await rm(join(root, 'app'), { recursive: true, force: true })
+  // app.asar.unpacked is a real directory (the name does not end in .asar),
+  // so a recursive rm is safe for it.
+  await rm(join(root, 'Resources', 'app.asar.unpacked'), { recursive: true, force: true })
+  await unlink(join(root, 'Resources', 'app.asar'))
+  await rmdir(join(root, 'Resources'))
+  await rmdir(root)
+}
+
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
+  await Promise.all(roots.splice(0).map(root => removePackagedApp(root)))
 })
 
 /** A 64-bit Mach-O header followed by padding. */

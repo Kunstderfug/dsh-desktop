@@ -94,9 +94,15 @@ describe('draft sessions: sidebar rows under the project folder', () => {
   it('stops New Session from resuming a draft-carrying blank session', async () => {
     const patch = await readPatch('@deepseek-ai/dsh-client-ui-workspace')
 
-    expect(patch).toContain(
-      '!archived.includes(summary.id) && draftPreviewOf(summary.id) === ""'
-    )
+    // Old contract (0.1.5-rc.2): the draft check extended the reuse
+    // condition — `!archived.includes(summary.id) && draftPreviewOf(summary.id) === ""`.
+    // Upstream 0.2.0-rc.2 turned the reuse loop into a continue-guard and
+    // reads the loop variable `id` instead of `summary.id`, so that string
+    // can no longer appear; the carried patch skips draft-carrying blanks
+    // with an explicit guard. New contract: that guard must stay in the
+    // reuse loop, or New Session resumes a session the sidebar shows as a
+    // draft row.
+    expect(patch).toContain('if (draftPreviewOf(id) !== "") continue;')
   })
 
   it('declares the node and locale extensions in the package types', async () => {
