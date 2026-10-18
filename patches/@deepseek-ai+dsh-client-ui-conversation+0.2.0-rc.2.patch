@@ -1,8 +1,8 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js
-index 0000000..1111111 100644
+index 7f3f791..358d7cc 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js
-@@ -3213,6 +3213,25 @@
+@@ -3213,6 +3213,25 @@ window.__ModuleLoader__.load({
  				return null;
  			}
  		}
@@ -28,7 +28,7 @@ index 0000000..1111111 100644
  		//#endregion
  		//#region ../../context/file-reference/lib/types/grammar.js
  		/**
-@@ -14258,6 +14213,26 @@
+@@ -14258,6 +14277,26 @@ window.__ModuleLoader__.load({
  					}
  				});
  				this.shells.set(binding, shell);
@@ -55,7 +55,7 @@ index 0000000..1111111 100644
  				actx.effect(() => {
  					const offs = [
  						actx.on("slash/input-begin-command", (req) => shell.beginCommand(req.claim, req.span) ? true : void 0),
-@@ -15795,12 +15795,13 @@
+@@ -15795,12 +15834,13 @@ window.__ModuleLoader__.load({
  		//#endregion
  		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css.mjs
  		const css$4 = ".wSkVaW_root{background:var(--dsw-alias-bg-base);flex-direction:column;min-width:0;height:100%;display:flex;position:relative}.wSkVaW_header{box-sizing:border-box;border-bottom:.5px solid var(--dsw-alias-border-l3);flex:none;grid-template-columns:auto minmax(0,1fr);min-height:76px;padding:10px 28px 0 20px;display:grid}.wSkVaW_header:where(:not(:has(.wSkVaW_tabs))){min-height:0;padding-bottom:10px}.wSkVaW_headerBlank{border-bottom:none;min-height:0;padding-bottom:0}.wSkVaW_headerBlank .wSkVaW_headerCorner{margin-left:auto}html:not([data-platform=darwin]) .wSkVaW_headerSessionless{padding-top:0}html:not([data-platform=darwin]) .wSkVaW_headerSessionless .wSkVaW_titleRow{min-height:0}[data-platform=darwin] .wSkVaW_headerLeading,[data-platform=darwin] .wSkVaW_headerActions,[data-platform=darwin] .wSkVaW_headerUtilities,[data-platform=darwin] .wSkVaW_headerCorner{-webkit-app-region:no-drag}.wSkVaW_titleRow{min-height:30px;grid-column:2;align-items:center;gap:0;padding-inline-start:max(0px, calc(var(--dsh-frame-leading-clearance,0px) - 20px));display:flex;container-type:inline-size}.wSkVaW_titleCluster{flex:1;align-items:center;gap:10px;min-width:0;display:flex}.wSkVaW_headerLeading{flex:none;grid-area:1/1;align-items:center;gap:8px;display:flex}.wSkVaW_crumbs{white-space:nowrap;align-items:center;gap:4px;min-width:0;display:flex;overflow:hidden}.wSkVaW_crumbSeg{align-items:center;gap:4px;min-width:0;display:inline-flex}.wSkVaW_crumbSep{color:var(--dsw-alias-label-caption);font-size:14px;line-height:20px}.wSkVaW_crumb{border-radius:var(--dsw-radius-md);max-width:220px;color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;cursor:pointer;background:0 0;border:none;padding:4px 8px;font-size:14px;line-height:20px;display:inline-block;overflow:hidden}.wSkVaW_crumbSubagent{font-size:12px;line-height:18px}button.wSkVaW_crumb:hover{background:var(--dsw-alias-interactive-bg-hover)}.wSkVaW_crumbCurrent{color:var(--dsw-alias-label-primary);cursor:default;font-weight:500}.wSkVaW_headerActions{flex:none;align-items:center;gap:8px;display:flex}.wSkVaW_headerUtilities{flex:none;align-items:center;gap:8px;margin-left:20px;display:flex}.wSkVaW_headerUtilities:empty{display:none}.wSkVaW_headerCorner{flex:none;align-items:center;margin-left:8px;margin-right:-16px;display:flex}.wSkVaW_headerCorner:empty{display:none}.wSkVaW_tabs{z-index:1;grid-column:1/-1;gap:36px;margin-top:10px;padding-left:8px;display:flex;position:relative}.wSkVaW_tab{color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:none;padding:0 0 9px;font-size:13px;font-weight:500;line-height:16px;position:relative}.wSkVaW_tab:after{content:\"\";background:0 0;border-radius:2px;height:2px;position:absolute;bottom:-1px;left:0;right:0}.wSkVaW_tabActive{color:var(--dsw-alias-state-business-primary)}.wSkVaW_tabActive:after{background:var(--dsw-alias-state-business-primary)}.wSkVaW_viewArea{flex-direction:column;flex:1;min-height:0;display:flex}.wSkVaW_widthHandle{z-index:0;width:min(10px, calc((100% - var(--dsh-chat-content-width)) / 2 - 24px - 24px));cursor:col-resize;position:absolute;top:0;bottom:0}.wSkVaW_widthHandle[data-side=left]{right:calc(50% + var(--dsh-chat-content-width) / 2 + 24px)}.wSkVaW_widthHandle[data-side=right]{left:calc(50% + var(--dsh-chat-content-width) / 2 + 24px)}.wSkVaW_widthHandle:after{content:\"\";background:linear-gradient(to bottom, transparent calc(var(--dsh-width-handle-pointer-y,50%) - 36px), var(--dsw-alias-scrollbar-bg-l1) calc(var(--dsh-width-handle-pointer-y,50%) - 8px), var(--dsw-alias-scrollbar-bg-l1) calc(var(--dsh-width-handle-pointer-y,50%) + 8px), transparent calc(var(--dsh-width-handle-pointer-y,50%) + 36px));opacity:0;pointer-events:none;border-radius:2px;width:2px;position:absolute;top:0;bottom:0}.wSkVaW_widthHandle[data-side=left]:after{right:4px}.wSkVaW_widthHandle[data-side=right]:after{left:4px}.wSkVaW_widthHandle:hover:after,.wSkVaW_widthHandle[data-dragging]:after{opacity:1}.wSkVaW_widthHandle[data-dragging]{z-index:8}.wSkVaW_root:has([data-conversation-composer-overlay]) .wSkVaW_widthHandle{display:none}.wSkVaW_composerStack{--dsh-composer-stack-gap:6px;gap:var(--dsh-composer-stack-gap);flex-direction:column;display:flex}.wSkVaW_composerSeat{--dsh-composer-text-max-height:336px;flex-direction:column;flex:none;display:flex}.wSkVaW_root[data-phase=active]{overflow:hidden}.wSkVaW_root[data-phase=active] .wSkVaW_header{flex:none}.wSkVaW_body{--dsh-chat-content-width:var(--dsh-chat-user-width,clamp(680px, calc(var(--dsh-conversation-column-width,0px) * .64), 920px));--dsh-composer-card-max-width:calc(var(--dsh-chat-content-width) + 32px);--dsh-composer-side-clearance:16px;--dsh-composer-dock-inset:8px;flex-direction:column;flex:1;min-height:0;display:flex;position:relative}.wSkVaW_embeddedBody{--dsh-chat-content-width:min(calc(100% - 32px), 920px);--dsh-composer-card-max-width:min(calc(100% - 16px), 952px);--dsh-composer-side-clearance:8px;--dsh-composer-dock-inset:8px;overflow:hidden}.wSkVaW_scrollBody{scrollbar-gutter:stable;flex-direction:column;flex:1;min-height:0;margin-right:2px;display:flex;overflow-y:auto}.wSkVaW_scrollBody::-webkit-scrollbar-track{margin:2px}.wSkVaW_root[data-phase=active] .wSkVaW_viewArea,.wSkVaW_embeddedBody[data-content-phase=active] .wSkVaW_viewArea{flex:1 0 auto;min-height:auto}.wSkVaW_root[data-phase=active] .wSkVaW_composerSeat,.wSkVaW_embeddedBody[data-content-phase=active] .wSkVaW_composerSeat{z-index:7;background:linear-gradient(180deg, color-mix(in srgb, var(--dsw-alias-bg-base) 0%, transparent) 0px, var(--dsw-alias-bg-base) 36px);position:sticky;bottom:0}.wSkVaW_root[data-phase=active] .wSkVaW_composerSeat:has([data-trigger-menu]){z-index:9}.wSkVaW_scrollBody:has([data-conversation-composer-overlay]){scrollbar-gutter:auto;position:relative;overflow:hidden auto}.wSkVaW_scrollBody:has([data-conversation-composer-overlay])>[data-slot=conversation\\.session]>.wSkVaW_viewArea{flex:1 1 0;min-height:0;overflow:hidden}.wSkVaW_scrollBody:has([data-conversation-composer-overlay])>.wSkVaW_composerSeat{right:var(--dsh-scrollbar-width);position:absolute;bottom:0;left:0}.wSkVaW_composerHero{width:min(calc(var(--dsh-composer-card-max-width) + 2 * var(--dsh-composer-side-clearance)), 100%);z-index:1;align-self:center;gap:8px;padding-bottom:32px}.wSkVaW_heroWorkspaceRow{align-items:center;gap:2px;min-width:0;margin-top:4px;padding:0 16px 0 20px;display:flex}.wSkVaW_root[data-phase=hero] .wSkVaW_scrollBody,.wSkVaW_embeddedBody[data-content-phase=hero] .wSkVaW_scrollBody{justify-content:center;overflow-y:auto}.wSkVaW_root[data-phase=settling] .wSkVaW_composerSeat,.wSkVaW_embeddedBody[data-content-phase=settling] .wSkVaW_composerSeat{visibility:hidden}";
@@ -70,7 +70,7 @@ index 0000000..1111111 100644
  			document.head.appendChild(tag);
  		}
  		var ConversationRoot_module_css_default = {
-@@ -15822,6 +15823,7 @@
+@@ -15822,6 +15862,7 @@ window.__ModuleLoader__.load({
  			"headerLeading": "wSkVaW_headerLeading",
  			"headerSessionless": "wSkVaW_headerSessionless",
  			"headerUtilities": "wSkVaW_headerUtilities",
@@ -78,7 +78,7 @@ index 0000000..1111111 100644
  			"heroWorkspaceRow": "wSkVaW_heroWorkspaceRow",
  			"root": "wSkVaW_root",
  			"scrollBody": "wSkVaW_scrollBody",
-@@ -16280,12 +16282,17 @@
+@@ -16280,12 +16321,17 @@ window.__ModuleLoader__.load({
  							setPickerOpen(false);
  						}
  					}),
@@ -97,7 +97,7 @@ index 0000000..1111111 100644
  				...inert ? {
  					disabled: true,
  					placeholder: t("placeholder.workspace"),
-@@ -16307,7 +16314,8 @@
+@@ -16307,7 +16353,8 @@ window.__ModuleLoader__.load({
  					}),
  					hero && heroWorkspaceRow,
  					zone !== void 0 && renderSlot("conversation.input.dock", zone),
@@ -107,7 +107,7 @@ index 0000000..1111111 100644
  				]
  			});
  			const composer = renderSlotChain("conversation.composer", {
-@@ -16351,7 +16359,8 @@
+@@ -16351,7 +16398,8 @@ window.__ModuleLoader__.load({
  		* @returns the Conversation subtree.
  		*/
  		function ConversationPanel({ renderSlot }) {
@@ -117,7 +117,7 @@ index 0000000..1111111 100644
  		}
  		//#endregion
  		//#region lib/types/client/skeleton/ConversationHeader.js
-@@ -16367,6 +16337,7 @@
+@@ -16367,6 +16415,7 @@ window.__ModuleLoader__.load({
  			const blank = session === void 0 || conversation === void 0 || session.blank && conversationPhase(session, conversation) === "blank";
  			return (0, react_jsx_runtime.jsxs)("header", {
  				className: clsx(ConversationRoot_module_css_default.header, blank && ConversationRoot_module_css_default.headerBlank, sessionId === void 0 && ConversationRoot_module_css_default.headerSessionless),
@@ -125,7 +125,7 @@ index 0000000..1111111 100644
  				"data-window-drag": true,
  				children: [(0, react_jsx_runtime.jsx)("div", {
  					className: ConversationRoot_module_css_default.headerLeading,
-@@ -16402,7 +16373,10 @@
+@@ -16402,7 +16451,10 @@ window.__ModuleLoader__.load({
  			const storedDraft = useStore((s) => s.draft);
  			const viewRequest = useStore((s) => s.viewRequest ?? null);
  			(0, react.useEffect)(() => {
@@ -137,7 +137,7 @@ index 0000000..1111111 100644
  				const unmirror = bindDraftMirror(actions.setDraft);
  				return () => {
  					unmirror();
-@@ -17169,13 +17178,16 @@
+@@ -17169,13 +17221,16 @@ window.__ModuleLoader__.load({
  		}
  		//#endregion
  		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-conversation/src/client/skeleton/InputBar.module.css.mjs
@@ -155,7 +155,7 @@ index 0000000..1111111 100644
  			document.head.appendChild(tag);
  		}
  		var InputBar_module_css_default = {
-@@ -17197,6 +17209,7 @@
+@@ -17197,6 +17252,7 @@ window.__ModuleLoader__.load({
  			"pending": "uV2eYG_pending",
  			"placeholder": "uV2eYG_placeholder",
  			"primary": "uV2eYG_primary",
@@ -163,16 +163,60 @@ index 0000000..1111111 100644
  			"retry": "uV2eYG_retry",
  			"root": "uV2eYG_root",
  			"row": "uV2eYG_row",
-@@ -17223,7 +17236,7 @@
+@@ -17223,11 +17279,32 @@ window.__ModuleLoader__.load({
  		* The no-session state renders the SAME div inert as the Workspace-picker
  		* trigger instead of a parallel tree.
  		*/
 -		const InputBar = (0, react.memo)(function InputBar({ useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments, retryFileUpload, toggleCommandMenu, stop, t, renderSlot, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher, useStopShortcut, useProjection, sessionId, variant, disabled: inert = false, blocked, workspacePickerOpen = false, onRequestWorkspace, placeholder, accessory }) {
-+		const InputBar = (0, react.memo)(function InputBar({ useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments, retryFileUpload, toggleCommandMenu, stop, t, renderSlot, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher, useStopShortcut, useProjection, sessionId, variant, disabled: inert = false, blocked, workspacePickerOpen = false, onRequestWorkspace, placeholder, accessory, extensionZone, openUploadedFile }) {
++		/*
++		* Desktop patch: the Send tooltip names the preferred action, then the action the
++		* primary-modifier Enter chord performs immediately before that chord's keycaps.
++		* Both labels arrive already localized. The chord is advertised only when a
++		* complementary action exists AND its keycaps resolved, so the bubble can never
++		* claim a keybinding that would not run, nor show a chord without its action.
++		*/
++		/* @dsh-desktop:begin compose-send-tooltip */
++		function composeSendTooltip({ label, keys, complementaryLabel, complementaryKeys }) {
++			if (complementaryLabel === null || complementaryKeys.length === 0) return {
++				label,
++				shortcutKeys: keys
++			};
++			return {
++				label: `${label} · ${complementaryLabel}`,
++				shortcutKeys: complementaryKeys
++			};
++		}
++		/* @dsh-desktop:end compose-send-tooltip */
++		const InputBar = (0, react.memo)(function InputBar({ useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments, retryFileUpload, toggleCommandMenu, stop, t, renderSlot, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher, useStopShortcut, useComplementaryShortcut = () => [], useProjection, sessionId, variant, disabled: inert = false, blocked, workspacePickerOpen = false, onRequestWorkspace, placeholder, accessory, extensionZone, openUploadedFile }) {
  			const input = useInput((s) => s);
  			const notice = useNotices((s) => s);
  			const busyEnter = useBusyEnter((s) => s);
-@@ -17451,10 +17464,6 @@
+ 			const stopKeys = useStopShortcut((keys) => keys);
++			/* Desktop patch: platform keycaps for the Cmd/Ctrl-accelerated submit chord. */
++			const complementaryKeys = useComplementaryShortcut((keys) => keys);
+ 			const commandMenuOpen = useMenuLauncher((source) => source === "command");
+ 			const [activity, setActivity] = (0, react.useState)(false);
+ 			(0, react.useEffect)(() => {
+@@ -17405,6 +17482,18 @@ window.__ModuleLoader__.load({
+ 			const primarySubmitMode = resolveSubmitMode(busyEnter, running, "enter", steeringAvailable);
+ 			const plainMessageDraft = !empty && input?.phase === "plain" && !draft.trimStart().startsWith("/");
+ 			const primaryLabel = primaryStops ? t("input.stop") : running && steeringAvailable && !disabled && !uploadsPending && plainMessageDraft ? t(primarySubmitMode === "steer" ? "input.send.steer" : "input.send.queue") : t("input.send");
++			/*
++			* Desktop patch: the Send button performs the preferred busy-Enter behavior,
++			* while the chord performs its complement. `complementaryLabel` names that
++			* complement so the bubble never reads as if the chord pressed this button.
++			*/
++			const complementaryLabel = running && steeringAvailable && !disabled && !uploadsPending && plainMessageDraft ? t(primarySubmitMode === "steer" ? "input.send.queue" : "input.send.steer") : null;
++			const sendTooltip = composeSendTooltip({
++				label: primaryStops ? t("input.stop") : primaryLabel,
++				keys: primaryStops ? stopKeys : void 0,
++				complementaryLabel: primaryStops ? null : complementaryLabel,
++				complementaryKeys
++			});
+ 			const onPrimary = () => {
+ 				if (primaryStops) {
+ 					stop?.();
+@@ -17451,10 +17540,6 @@ window.__ModuleLoader__.load({
  								className: InputBar_module_css_default.overlayAnchor,
  								children: renderSlot("conversation.input.overlay", {})
  							}),
@@ -183,7 +227,7 @@ index 0000000..1111111 100644
  							renderSlot("conversation.input.attachments", {
  								attachments,
  								canAcceptDrop,
-@@ -17466,25 +17475,35 @@
+@@ -17466,25 +17551,35 @@ window.__ModuleLoader__.load({
  								onRetryFile: (id) => {
  									retryFileUpload?.(id);
  								},
@@ -233,7 +277,18 @@ index 0000000..1111111 100644
  							}),
  							(0, react_jsx_runtime.jsxs)("div", {
  								ref: rowRef,
-@@ -17612,7 +17631,7 @@
+@@ -17568,8 +17663,8 @@ window.__ModuleLoader__.load({
+ 											})
+ 										}),
+ 										(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+-											label: primaryStops ? t("input.stop") : primaryLabel,
+-											shortcutKeys: primaryStops ? stopKeys : void 0,
++											label: sendTooltip.label,
++											shortcutKeys: sendTooltip.shortcutKeys,
+ 											side: "top",
+ 											delayMs: 500,
+ 											disabled: primaryDisabled,
+@@ -17612,7 +17707,7 @@ window.__ModuleLoader__.load({
  					}),
  					(0, react_jsx_runtime.jsxs)("div", {
  						className: InputBar_module_css_default.dock,
@@ -242,7 +297,32 @@ index 0000000..1111111 100644
  							useProjection,
  							t
  						})]
-@@ -18179,6 +18198,14 @@
+@@ -18023,6 +18118,8 @@ window.__ModuleLoader__.load({
+ 				scopedConversation(sessions, sessionId).cancel().catch((_error) => {});
+ 			};
+ 			const stopShortcut = (0, _deepseek_ai_dsh_client_store.createSnapshotStore)([]);
++			/* Desktop patch: platform keycaps for the Send tooltip's complementary submit chord. */
++			const complementaryShortcut = (0, _deepseek_ai_dsh_client_store.createSnapshotStore)([]);
+ 			ctx.inject(["shortcuts"], (scope) => {
+ 				const fixedInputs = [
+ 					{
+@@ -18105,6 +18202,15 @@ window.__ModuleLoader__.load({
+ 						dispose();
+ 					};
+ 				}, "ui-conversation: fixed stop reference");
++				scope.effect(() => {
++					complementaryShortcut.set(scope.shortcuts.describeBinding({
++						code: "Enter",
++						modifiers: ["primary"]
++					}).keys);
++					return () => {
++						complementaryShortcut.set([]);
++					};
++				}, "ui-conversation: fixed complementary reference");
+ 			});
+ 			const inputHub = new InputHub(ctx, t);
+ 			const composerBlocks = new ComposerBlockRegistry();
+@@ -18179,6 +18285,14 @@ window.__ModuleLoader__.load({
  					"conversation.hero.agentPreset": {
  						kind: "single",
  						scope: "session-maybe"
@@ -257,7 +337,7 @@ index 0000000..1111111 100644
  					}
  				},
  				slots: {
-@@ -18302,6 +18329,10 @@
+@@ -18302,6 +18416,10 @@ window.__ModuleLoader__.load({
  						kind: "list",
  						scope: "session"
  					},
@@ -268,7 +348,7 @@ index 0000000..1111111 100644
  					"conversation.input.permission": {
  						kind: "single",
  						scope: "session"
-@@ -18338,6 +18369,7 @@
+@@ -18338,10 +18456,12 @@ window.__ModuleLoader__.load({
  						removeAttachment: void 0,
  						resolveDraftAttachments: void 0,
  						retryFileUpload: void 0,
@@ -276,7 +356,12 @@ index 0000000..1111111 100644
  						toggleCommandMenu: void 0,
  						stop: void 0,
  						hooks: {
-@@ -18404,6 +18436,11 @@
+ 							stopShortcut,
++							complementaryShortcut,
+ 							busyEnter: submissionPolicy.busyEnter,
+ 							fileUploads: ABSENT_FILE_UPLOADS,
+ 							notices: ABSENT_NOTICES,
+@@ -18404,6 +18524,11 @@ window.__ModuleLoader__.load({
  						retryFileUpload: (id) => {
  							if (sessions.binding(sessionId) !== void 0) conversation.retryFileUpload(sessionId, id);
  						},
@@ -288,7 +373,15 @@ index 0000000..1111111 100644
  						toggleCommandMenu: inputTriggers === void 0 ? void 0 : (selection) => {
  							shell.dismissPopup();
  							const snapshot = shell.snapshot;
-@@ -18436,10 +18473,7 @@
+@@ -18423,6 +18548,7 @@ window.__ModuleLoader__.load({
+ 						},
+ 						hooks: {
+ 							stopShortcut,
++							complementaryShortcut,
+ 							busyEnter: submissionPolicy.busyEnter,
+ 							fileUploads: conversation.fileUploads,
+ 							notices: shell.notices,
+@@ -18436,10 +18562,7 @@ window.__ModuleLoader__.load({
  				yield slots.register({
  					name: "main",
  					key: "conversation",
@@ -301,10 +394,10 @@ index 0000000..1111111 100644
  				yield registerConversationRoot();
  				yield registerConversationContent();
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/slots.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/slots.d.ts
-index 0000000..1111111 100644
+index 74f5846..8dd38d4 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/slots.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/slots.d.ts
-@@ -118,6 +118,12 @@
+@@ -118,6 +118,12 @@ export type UseConversation = SnapshotSelectorHook<ConversationSnapshot>;
  export type UseConversationViews = SnapshotSelectorHook<readonly ViewTab[]>;
  declare module '@deepseek-ai/dsh-client-ui-slots' {
      interface SlotMap {
@@ -317,7 +410,7 @@ index 0000000..1111111 100644
          /** Conversation shell beneath its root-scoped main-panel entry. */
          'main.conversation': {
              kind: 'single';
-@@ -210,6 +216,18 @@
+@@ -210,6 +216,18 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
              scope: 'session-maybe';
              owner: HeroAgentPresetOwnerProps;
          };
@@ -336,7 +429,7 @@ index 0000000..1111111 100644
          /** Full-width entries above the composer card. */
          'conversation.input.dock': {
              kind: 'list';
-@@ -221,10 +239,17 @@
+@@ -221,10 +239,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
              kind: 'list';
              scope: 'session';
          };
@@ -354,7 +447,7 @@ index 0000000..1111111 100644
          };
          /** Compact controls at the left of the composer tool row. */
          'conversation.input.left': {
-@@ -440,8 +465,10 @@
+@@ -440,8 +465,10 @@ export interface ComposerBarOwnerProps {
      /** Open the Workspace picker from the inert composer surface. */
      onRequestWorkspace?: () => void;
      placeholder?: string;
@@ -366,7 +459,19 @@ index 0000000..1111111 100644
  }
  /** Package-private operations injected into the resident composer bar. */
  export interface ComposerBarInjected {
-@@ -486,7 +513,7 @@
+@@ -463,6 +490,11 @@ export interface ComposerBarInjected {
+     hooks: {
+         /** Readable sequence while the fixed Stop command is registered. */
+         stopShortcut: ObservableSnapshot<readonly string[]>;
++        /**
++         * Platform keycaps for the primary-modifier Enter chord, whose action is
++         * the complement of `busyEnter`; empty until the shortcuts service binds.
++         */
++        complementaryShortcut: ObservableSnapshot<readonly string[]>;
+         /**
+          * Live busy-state submission preference: the delivery mode plain Enter
+          * and the primary Send button use while the addressed agent is busy.
+@@ -486,7 +518,7 @@ export interface InputActivityOwnerProps extends InputControlOwnerProps {
      onActiveChange: (active: boolean) => void;
  }
  /** Full props of the resident composer bar. */
@@ -376,13 +481,14 @@ index 0000000..1111111 100644
  export interface ComposerChainProps {
      /** Current Session identity used by temporary business-owned entries. */
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/skeleton/ConversationPanel.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/skeleton/ConversationPanel.d.ts
-index 0000000..1111111 100644
+index 046ea88..aed438a 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/skeleton/ConversationPanel.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/skeleton/ConversationPanel.d.ts
-@@ -5,5 +5,5 @@
+@@ -5,5 +5,5 @@ import type { PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-
   * @param props - main-slot inputs and the declared Conversation renderer.
   * @returns the Conversation subtree.
   */
 -export declare function ConversationPanel({ renderSlot }: PropsRuntime<'main'> & PropsRenderSlots<'main.conversation'>): import("react").ReactNode;
 +export declare function ConversationPanel({ renderSlot }: PropsRuntime<'main'> & PropsRenderSlots<'main.conversation' | 'desktop.workbench.frame'>): import("react").ReactNode;
  //# sourceMappingURL=ConversationPanel.d.ts.map
+\ No newline at end of file
