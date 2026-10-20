@@ -7,8 +7,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
-import type { ContinuableStartSpec, SubagentStopReason } from '@deepseek-ai/dsh-subagent'
-import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
+import type { SubagentActivationSpec, SubagentStopReason } from '@deepseek-ai/dsh-subagent'
 
 /** Stable lineage label stored on every researcher child and task event. */
 export declare const RESEARCHER_LABEL: 'researcher'
@@ -46,20 +45,29 @@ export declare function buildResearchBrief(input: {
   workspace: string
 }): string
 
-/** The child `toolFilter` deny list for mutation tools. */
-export declare function researcherToolFilter(): ToolRestriction
+/** Register one spawned researcher child for the read-only guard. */
+export declare function markResearcherChild(childId: string): void
+
+/** Release one finished researcher child. */
+export declare function releaseResearcherChild(childId: string): void
+
+/** Whether one session is a live researcher child. */
+export declare function isResearcherChild(sessionId: unknown): boolean
+
+/** The model-visible refusal for one denied researcher tool call. */
+export declare function formatResearcherRefusal(toolName: string): string
 
 /** Map a continuable-child stop reason to the terminal research phase. */
 export declare function mapResearchSettlement(
   stopReason: SubagentStopReason
 ): 'researched' | 'research-failed'
 
-/** Build the `startContinuable` specification for one researcher child. */
+/** Build the `startActivation` specification for one researcher child. */
 export declare function buildResearcherStartSpec(input: {
   parent: Agent
   objective: string
   signal: AbortSignal
-}): ContinuableStartSpec
+}): SubagentActivationSpec
 
 /** Pull the full structured report through `sendMessage`. */
 export declare function retrieveResearcherReport(

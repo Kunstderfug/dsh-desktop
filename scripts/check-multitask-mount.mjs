@@ -8,7 +8,7 @@
 //   (a) the host startup line "[multitask] plugin active" appears in the
 //       desktop's Harness log for the current boot (the Harness child's
 //       stdout is what the desktop main process writes there), and
-//   (b) the placeholder occupant renders in the live renderer, measured
+//   (b) the live multitask slot occupant renders in the live renderer, measured
 //       over the Chrome DevTools Protocol the same way scripts/cdp-eval.mjs
 //       talks to the app.
 //
@@ -31,7 +31,12 @@ import process from 'node:process'
 
 const STARTUP_LINE = '[multitask] plugin active'
 const BOOT_MARKER = '[desktop] starting '
-const PLACEHOLDER_SELECTOR = '[data-dsh-multitask-placeholder]'
+// Since #11 the composer-dock occupant is the live claim layer whenever the
+// client boots in a browser (client.js registers ClaimBadgeLayer unconditionally
+// when `document` exists), so the scaffold placeholder selector is unreachable
+// DOM state; the live occupant proves the same thing — the client module was
+// served, composed, and mounted its slot registration.
+const LIVE_OCCUPANT_SELECTOR = '[data-dsh-multitask-claim-layer]'
 const CDP_PORT = Number(process.env.DSH_MULTITASK_CDP_PORT ?? 9223)
 const CDP_HOST = `127.0.0.1:${CDP_PORT}`
 const BOOT_DEADLINE_MS = 300_000
@@ -345,14 +350,15 @@ try {
   } while (endpoint === undefined)
   log('check-multitask-mount: renderer page is up on the Harness origin')
 
-  // Phase 2: wait for boot to finish and the placeholder to render. Two
+  // Phase 2: wait for boot to finish and the multitask slot occupant to
+  // render. Two
   // shared-state failure shapes must fail fast with their cause instead of
   // burning the whole boot window:
   //   - the Harness entry rejecting at startup (e.g. a malformed overlay in
   //     the SHARED profile home — that file is user state every dev checkout
   //     on this machine composes into), and
   //   - the desktop's automatic safe-mode fallback, where third-party profile
-  //     bundles are blocked and a plugin placeholder can never render.
+  //     bundles are blocked and a plugin slot occupant can never render.
   const deadline = Date.now() + BOOT_DEADLINE_MS
   let occupantRendered = false
   let lastProbe = 'not probed yet'
@@ -361,7 +367,7 @@ try {
     if (Date.now() > deadline) {
       fail(
         [
-          `the placeholder occupant never rendered within the boot window; last renderer probe: ${lastProbe}`,
+          `the multitask slot occupant never rendered within the boot window; last renderer probe: ${lastProbe}`,
           'The client module is either not served or its composition failed — search the Harness',
           'log and dev output for client-modules errors. Captured dev output (tail):',
           ...devOutput.slice(-15).map((line) => `  | ${line}`)
@@ -374,7 +380,7 @@ try {
       fail(
         [
           'the Harness entry failed during startup; the desktop will fall back to safe mode, where',
-          'third-party profile bundles (and therefore this placeholder) are blocked.',
+          'third-party profile bundles (and therefore this slot occupant) are blocked.',
           cause?.trim() !== undefined ? `Cause: ${cause.trim()}` : 'Cause line not captured; see the Harness log tail.',
           'Note: the overlay parsed at that point is the SHARED profile cordis.patch.yml under the',
           'dev DSH_HOME — state every dev checkout on this machine composes into, not this ticket\'s',
@@ -390,7 +396,7 @@ try {
       fail(
         [
           'the desktop fell back to SAFE MODE, which blocks third-party profile bundles — the',
-          'placeholder occupant cannot render there and the mount cannot be verified in this boot.',
+          'slot occupant cannot render there and the mount cannot be verified in this boot.',
           'Resolve the cause the desktop logged before this fallback (see the Harness log tail),',
           'then re-run. Harness log tail:',
           tail(harnessLog.path).split('\n').slice(-25).map((line) => `  | ${line}`).join('\n')
@@ -402,10 +408,10 @@ try {
       try {
         const found = await evaluate(
           current,
-          `document.querySelector(${JSON.stringify(PLACEHOLDER_SELECTOR)}) !== null`
+          `document.querySelector(${JSON.stringify(LIVE_OCCUPANT_SELECTOR)}) !== null`
         )
         if (found === true) occupantRendered = true
-        else lastProbe = `selector ${PLACEHOLDER_SELECTOR} not in the DOM yet`
+        else lastProbe = `selector ${LIVE_OCCUPANT_SELECTOR} not in the DOM yet`
       } catch (error) {
         lastProbe = `evaluation failed (${error instanceof Error ? error.message : String(error)})`
       }
@@ -414,7 +420,7 @@ try {
     }
     if (!occupantRendered) sleep(1_000)
   }
-  log(`check-multitask-mount: placeholder occupant rendered (${PLACEHOLDER_SELECTOR} present in the live renderer)`)
+  log(`check-multitask-mount: multitask slot occupant rendered (${LIVE_OCCUPANT_SELECTOR} present in the live renderer)`)
 
   // Phase 3: the host startup line for the current boot. A freshly started
   // app must have appended it since this script began; an attached app must

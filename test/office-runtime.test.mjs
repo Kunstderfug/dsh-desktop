@@ -1,7 +1,7 @@
 import { spawn, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createHash } from 'node:crypto'
-import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -63,6 +63,34 @@ describe('Office template preview limits', () => {
 })
 
 describe('Office runtime assembly', () => {
+  it('retries the runtime payload removal when a dying office worker re-enters the tree', async () => {
+    const { removeRuntimePayload } = await import('../scripts/office-runtime/prepare.mjs')
+    const output = await temporary()
+    const payload = join(output, 'runtime')
+    await mkdir(join(payload, 'python', 'lib'), { recursive: true })
+    for (let index = 0; index < 4000; index += 1) {
+      await writeFile(join(payload, 'python', 'lib', `module-${index}.pyc`), 'x')
+    }
+    // Simulate the teardown race observed on `npm run dev`: a worker that was
+    // killed while the removal walks the tree writes one late __pycache__ file
+    // into a directory fs.rm is about to rmdir, which fails the removal with
+    // ENOTEMPTY. The removal must outlive that writer and still clear the tree.
+    const lateWriter = setTimeout(async () => {
+      try {
+        await mkdir(join(payload, 'python', 'lib', '__pycache__'), { recursive: true })
+        await writeFile(join(payload, 'python', 'lib', '__pycache__', 'late.cpython-312.pyc'), 'x')
+      } catch {
+        // The removal already finished before the simulated writer ran; nothing to race.
+      }
+    }, 120)
+    try {
+      await removeRuntimePayload(output)
+      await expect(stat(join(output, 'runtime')).then(() => false, () => true)).resolves.toBe(true)
+    } finally {
+      clearTimeout(lateWriter)
+    }
+  }, 30_000)
+
   it('runs the full packaging gate against the current Office skills and physical resources', async () => {
     const resources = await temporary()
     await symlink(join(root, '.build/office-runtime'), join(resources, 'office-runtime'), process.platform === 'win32' ? 'junction' : 'dir')

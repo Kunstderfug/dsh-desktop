@@ -294,21 +294,36 @@ describe('DSH PPT built-in plugin', () => {
     expect(profilePatch).not.toContain('workbuddy')
   })
 
-  it('declares the webserver dependency that PPT channel registration resolves', async () => {
-    // `connection.rpc.handle(channel, …)` — what dsh-ppt calls for /dsh-ppt and
-    // /kimi-ppt — mounts one prefix route per channel on the webserver, and it
-    // reads `webServer` from the fiber that *provides* `connection` rather than
-    // from the plugin registering the channel. The stock web-app bundle injects
-    // only `webRuntime` there, so without this row every 0.1.5 profile boot
-    // aborts with `cannot get property "webServer" without inject`. The shared
-    // /api channel keeps working either way: `connection` mounts that itself
-    // under its own `ctx.inject(['webServer'])`.
+  it('keeps dead webRuntime declarations out of the profile patch', async () => {
+    // 0.1.5 needed an overlay row injecting `webRuntime` + `webServer` onto the
+    // `connection` entry because `rpc.handle` resolved `webServer` from the
+    // providing fiber and the stock bundle only injected `webRuntime` there.
+    // 0.2.1 removed the `webRuntime` service entirely; upstream `connection`
+    // and our dsh-ppt core each self-inject `webServer` for their own route
+    // registrations, so the overlay row would hang profile boot waiting for a
+    // service nobody provides (13-plugin activation cascade).
     const profilePatch = await readFile(
       path.join(projectRoot, 'build', 'dsh-desktop.patch.yml'),
       'utf8'
     )
 
-    expect(profilePatch).toMatch(/- id: connection\n  inject:\n    - webRuntime\n    - webServer\n/)
+    expect(profilePatch).not.toContain('webRuntime')
+    expect(profilePatch).not.toMatch(/- id: connection\n/)
+  })
+
+  it('registers the PPT channels under the adapter fiber webServer injection', async () => {
+    // The 0.2.1 replacement for the removed overlay row: the shared Office PPT
+    // implementation declares `inject: ['webServer']` itself and mounts
+    // /dsh-ppt and /kimi-ppt inside that callback, so no provider-fiber
+    // workaround is required.
+    const core = await readFile(
+      path.join(projectRoot, 'packages', 'ppt-runtime', 'core', 'lib', 'index.js'),
+      'utf8'
+    )
+
+    expect(core).toContain('ctx.inject(["webServer"], (webCtx) => {')
+    expect(core).toContain('registerPptRpcRoute(webCtx, "/dsh-ppt", rpcHandler)')
+    expect(core).toContain('registerPptRpcRoute(webCtx, "/kimi-ppt", rpcHandler)')
   })
 })
 

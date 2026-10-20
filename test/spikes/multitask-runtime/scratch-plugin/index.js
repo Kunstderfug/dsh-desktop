@@ -13,7 +13,7 @@
  * host-side shape the ticket asks for:
  *
  *   1. spawn a continuable background child with no model tool-call:
- *      `ctx.subagents.startContinuable({ provider: 'spawn', … })` — the child
+ *      `ctx.subagents.startActivation({ provider: 'spawn', … })` — the child
  *      inherits the parent's provider/model when `agentOptions` is omitted
  *      (`resolveChildAgentOptions`, dsh-subagent), so in the real dev app it
  *      runs the live model;
@@ -78,14 +78,15 @@ async function execute(ctx, invocation) {
 
   // (1) Host-side continuable spawn — no model tool-call involved. The child
   // starts its own initial turn on the prompt above.
-  const start = await ctx.subagents.startContinuable({
+  const start = await ctx.subagents.startActivation({
     provider: 'spawn',
     label: CHILD_LABEL,
     request: {
       prompt: [{ type: 'text', text: promptText }],
       parent
     },
-    signal: invocation.signal
+    signal: invocation.signal,
+    delivery: 'parent'
   })
 
   // (2) Queue the handoff on the parent. followup() is the non-interrupting

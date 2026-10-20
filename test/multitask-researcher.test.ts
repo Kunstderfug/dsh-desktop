@@ -29,7 +29,7 @@ import {
   type StreamChunk,
   ToolCallId
 } from '@deepseek-ai/dsh-llm'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -39,6 +39,7 @@ import * as subagentSpawnInProcess from '@deepseek-ai/dsh-subagent-spawn-in-proc
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
 import * as multitask from '../packages/dsh-multitask/index.js'
+import { StubWorkingDirectory } from './helpers/working-directory-stub'
 
 const RESEARCHER_LABEL = 'researcher'
 const DENIED_TOOLS = ['write', 'edit', 'str_replace_editor'] as const
@@ -154,6 +155,9 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
 
   const loop = await ctx.plugin(AgentLoop)
   pushCore(() => loop.dispose())
+  // 0.2.1 SubagentRuntime injects workingDirectory; the stub keeps this fixture focused.
+  const workingDirectory = await ctx.plugin(StubWorkingDirectory, home)
+  pushCore(() => workingDirectory.dispose())
   const subagents = await ctx.plugin(SubagentRuntime)
   pushCore(() => (subagents as { dispose(): Promise<void> }).dispose())
   const spawn = await ctx.plugin(subagentSpawnInProcess as unknown as Parameters<Context['plugin']>[0])
@@ -408,27 +412,27 @@ describe('multitask_researcher_gate child write denial', () => {
 
     await waitFor(() => f.ctx.agents.get(SessionId(childId)) !== undefined, 'live researcher agent')
     const child = f.ctx.agents.get(SessionId(childId))!
-    expect(f.ctx.tools.get('write', child)).toBeUndefined()
-    expect(f.ctx.tools.get('edit', child)).toBeUndefined()
-    expect(f.ctx.tools.get('str_replace_editor', child)).toBeUndefined()
+    // 0.2.1 dropped the per-child toolFilter from the start request: the
+    // writer tools stay visible in the child's view and the host guard refuses
+    // every call at tools/pre-execute instead.
+    for (const name of DENIED_TOOLS) {
+      expect(f.ctx.tools.get(name, child), `${name} stays visible to the guarded child`).toBeDefined()
+    }
 
     const descriptor = child.session.snapshotEvents().find(event => event.type === 'subagent/descriptor')
     expect(descriptor).toBeDefined()
     expect(descriptor!.data).toMatchObject({
-      mode: 'continuable',
-      label: RESEARCHER_LABEL,
-      toolFilter: { deny: [...DENIED_TOOLS] }
+      label: RESEARCHER_LABEL
     })
-    const persona = 'persona' in descriptor!.data ? String(descriptor!.data.persona ?? '') : ''
-    expect(persona).toMatch(/researcher/i)
+    const childLog = JSON.stringify(child.session.snapshotEvents())
+    expect(childLog, 'the persona is folded into the child prompt').toContain('You are the multitask researcher.')
 
     await waitFor(() =>
       child.session.snapshotEvents().some(event => event.type === 'tool/result'),
     'denied mutation tool result')
     const toolResult = child.session.snapshotEvents().find(event => event.type === 'tool/result')!
     const denialText = JSON.stringify(toolResult.data)
-    expect(denialText).toContain('UNKNOWN_TOOL')
-    expect(denialText).toMatch(/unknown tool \\?"write\\?"/i)
+    expect(denialText).toContain('researcher is read-only')
     expect(denialText).toContain('"isError":true')
     expect(denialText).not.toContain('do not modify files')
 

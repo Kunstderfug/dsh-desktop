@@ -4,7 +4,8 @@
  *
  * The Harness `SubagentRuntime` remains the child lifecycle and persistence
  * owner. This module only builds the system-owned brief, the child spawn
- * specification (`toolFilter` + persona), and the deterministic phase map.
+ * specification, the read-only registry the host guard enforces, and the
+ * deterministic phase map.
  *
  * @module dsh-multitask/researcher
  */
@@ -99,22 +100,51 @@ export function buildResearchBrief({ objective, workspace }) {
 }
 
 /**
- * The child `toolFilter` for one researcher child.
+ * Live researcher children the host guard keeps read-only.
  *
- * Deny names are intersected with the tools the deployment actually knows:
- * `tools.restrict()` rejects unknown names loud, so a hard-coded alias such
- * as `str_replace_editor` (absent in deployments without the Anthropic-style
- * toolset) fails the whole child materialization. The brief's prompt-level
- * denial still covers any alias the filter had to drop.
- *
- * @param knownTools - optional set of tool names the deployment knows.
- * @returns the `toolFilter` deny list.
+ * Harness 0.2.1 dropped the per-child `toolFilter` from the start request, so
+ * the denial moved to the `tools/pre-execute` guard: the plugin registers each
+ * spawned researcher id here and the guard refuses writer tools for it until
+ * `subagent/end` releases the id.
  */
-export function researcherToolFilter(knownTools) {
-  const deny = typeof knownTools?.has === 'function'
-    ? RESEARCHER_DENIED_TOOLS.filter(name => knownTools.has(name))
-    : [...RESEARCHER_DENIED_TOOLS]
-  return { deny }
+const researcherChildren = new Set()
+
+/**
+ * Register one researcher child for the read-only guard.
+ *
+ * @param childId - durable child session id.
+ */
+export function markResearcherChild(childId) {
+  researcherChildren.add(String(childId))
+}
+
+/**
+ * Release one finished researcher child.
+ *
+ * @param childId - durable child session id.
+ */
+export function releaseResearcherChild(childId) {
+  researcherChildren.delete(String(childId))
+}
+
+/**
+ * Whether one session is a live researcher child.
+ *
+ * @param sessionId - candidate session id.
+ * @returns true while the child is registered from spawn to `subagent/end`.
+ */
+export function isResearcherChild(sessionId) {
+  return sessionId !== undefined && researcherChildren.has(String(sessionId))
+}
+
+/**
+ * The model-visible refusal for one denied researcher tool call.
+ *
+ * @param toolName - tool the child tried to run.
+ * @returns the denial text naming the tool and the allowed alternative.
+ */
+export function formatResearcherRefusal(toolName) {
+  return `The researcher is read-only: ${toolName} is unavailable in a researcher child. Return the structured report instead.`
 }
 
 /**
@@ -128,26 +158,30 @@ export function mapResearchSettlement(stopReason) {
 }
 
 /**
- * Build the `startContinuable` specification for one researcher child.
+ * Build the `startActivation` specification for one researcher child.
+ *
+ * 0.2.1 accepts no persona or toolFilter at start: the persona is folded into
+ * the prompt and the read-only denial is enforced by the host guard.
  *
  * @param input
  * @param input.parent - receiving parent agent.
  * @param input.objective - trimmed task objective packed into the brief.
  * @param input.signal - caller cancellation until inbox acceptance.
- * @param input.knownTools - optional known tool names for the deny filter.
  */
-export function buildResearcherStartSpec({ parent, objective, signal, knownTools }) {
+export function buildResearcherStartSpec({ parent, objective, signal }) {
   const workspace = parent.session.header.cwd ?? process.cwd()
   return {
     provider: 'spawn',
     label: RESEARCHER_LABEL,
     request: {
-      prompt: [{ type: 'text', text: buildResearchBrief({ objective, workspace }) }],
-      parent,
-      persona: RESEARCHER_PERSONA,
-      toolFilter: researcherToolFilter(knownTools)
+      prompt: [{
+        type: 'text',
+        text: `${RESEARCHER_PERSONA}\n\n${buildResearchBrief({ objective, workspace })}`
+      }],
+      parent
     },
-    signal
+    signal,
+    delivery: 'parent'
   }
 }
 

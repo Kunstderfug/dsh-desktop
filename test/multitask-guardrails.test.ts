@@ -30,7 +30,7 @@ import {
   type StreamChunk,
   ToolCallId
 } from '@deepseek-ai/dsh-llm'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -40,6 +40,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import * as toolSubagent from '@deepseek-ai/dsh-tool-subagent'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
 import * as multitask from '../packages/dsh-multitask/index.js'
+import { StubWorkingDirectory } from './helpers/working-directory-stub'
 
 const DENIED_TOOLS = ['write', 'edit', 'str_replace_editor'] as const
 const RESEARCHER_LABEL = 'researcher'
@@ -145,6 +146,9 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
 
   const loop = await ctx.plugin(AgentLoop)
   push(() => loop.dispose())
+  // 0.2.1 SubagentRuntime injects workingDirectory; the stub keeps this fixture focused.
+  const workingDirectory = await ctx.plugin(StubWorkingDirectory, home)
+  push(() => workingDirectory.dispose())
   const subagents = await ctx.plugin(SubagentRuntime)
   push(() => (subagents as { dispose(): Promise<void> }).dispose())
   const spawn = await ctx.plugin(subagentSpawnInProcess as unknown as Parameters<Context['plugin']>[0])
@@ -526,12 +530,25 @@ describe('multitask_guardrails_gate researcher filter and bound', () => {
     const descriptor = child.session.snapshotEvents().find(event => event.type === 'subagent/descriptor')
     expect(descriptor).toBeDefined()
     expect(descriptor!.data).toMatchObject({
-      label: RESEARCHER_LABEL,
-      toolFilter: { deny: [...DENIED_TOOLS] }
+      label: RESEARCHER_LABEL
     })
-    expect(f.ctx.tools.get('write', child)).toBeUndefined()
-    expect(f.ctx.tools.get('edit', child)).toBeUndefined()
-    expect(f.ctx.tools.get('str_replace_editor', child)).toBeUndefined()
+    // 0.2.1 dropped the per-child toolFilter from the start request, so the
+    // read-only contract is enforced by the host guard at tools/pre-execute:
+    // the writer tools stay visible in the child's view but every call is
+    // refused with the researcher reason.
+    for (const name of ['write', 'edit', 'str_replace_editor']) {
+      const result = await f.ctx.tools.execute({
+        callId: ToolCallId(`researcher-${name}`),
+        name,
+        arguments: name === 'str_replace_editor'
+          ? { command: 'str_replace', path: 'researcher-denied.txt', old_str: 'a', new_str: 'b' }
+          : { file_path: 'researcher-denied.txt', content: 'nope' },
+        agent: child,
+        signal: new AbortController().signal
+      })
+      expect(result.isError, `${name} must be denied for a researcher child`).toBe(true)
+      expect(JSON.stringify(result), `${name} denial must name the guard`).toContain('researcher is read-only')
+    }
     await f.agent.whenIdle()
   })
 
@@ -552,16 +569,15 @@ describe('multitask_guardrails_gate researcher filter and bound', () => {
     await f.agent.whenIdle()
 
     for (const label of ['settle-2', 'settle-3']) {
-      await f.ctx.subagents.startContinuable({
+      await f.ctx.subagents.startActivation({
         provider: 'spawn',
         label,
         request: {
           prompt: [{ type: 'text', text: `do not modify files\nRecommended claim set\nstructured research report ${label}` }],
-          parent: f.agent,
-          persona: RESEARCHER_LABEL,
-          toolFilter: { deny: [...DENIED_TOOLS] }
+          parent: f.agent
         },
-        signal: new AbortController().signal
+        signal: new AbortController().signal,
+        delivery: 'parent'
       })
     }
     await f.agent.whenIdle()
@@ -569,16 +585,15 @@ describe('multitask_guardrails_gate researcher filter and bound', () => {
     expect(afterSettlements, 'instant settlements must not exceed the shared bound').toBeLessThanOrEqual(2)
     expect(afterSettlements).toBe(2)
 
-    await f.ctx.subagents.startContinuable({
+    await f.ctx.subagents.startActivation({
       provider: 'spawn',
       label: 'settle-over-bound',
       request: {
         prompt: [{ type: 'text', text: 'do not modify files\nRecommended claim set\nstructured research report over bound' }],
-        parent: f.agent,
-        persona: RESEARCHER_LABEL,
-        toolFilter: { deny: [...DENIED_TOOLS] }
+        parent: f.agent
       },
-      signal: new AbortController().signal
+      signal: new AbortController().signal,
+      delivery: 'parent'
     })
     await f.agent.whenIdle()
     expect(admittedHandoffs(f.agent).length, 'no second counter may wake above the bound').toBe(afterSettlements)

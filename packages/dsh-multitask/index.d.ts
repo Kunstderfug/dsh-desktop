@@ -239,6 +239,10 @@ export {
   RESEARCH_REPORT_HEADINGS,
   countResearchFailures,
   countResearchLaunches,
+  formatResearcherRefusal,
+  isResearcherChild,
   mapResearchSettlement,
+  markResearcherChild,
+  releaseResearcherChild,
   shouldRetryResearch
 } from './researcher.js'

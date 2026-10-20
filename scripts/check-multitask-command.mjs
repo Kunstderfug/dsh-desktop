@@ -227,6 +227,18 @@ const PAGE_HELPERS = `
         title: el.textContent ?? ''
       }))
     },
+    // Since 5963df7 (#11) the multitask client renders its keyed task-card chat
+    // node for 'multitask' commands and suppresses the generic command card
+    // (MultitaskCommandView returns null), so multitask results surface here —
+    // with data-task-id/data-phase/data-failed in both narrow and wide layouts.
+    taskCards() {
+      return [...document.querySelectorAll('[data-dsh-multitask-task-card]')].map((el) => ({
+        id: el.getAttribute('data-task-id') ?? '',
+        phase: el.getAttribute('data-phase') ?? '',
+        failed: el.getAttribute('data-failed') === 'true',
+        title: el.textContent ?? ''
+      }))
+    },
     dropAttachment(name) {
       const file = new File(['attachment admission sentinel ' + name], name, { type: 'text/plain' })
       const transfer = new DataTransfer()
@@ -456,7 +468,11 @@ function sessionLogFiles(modifiedSince) {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name)
       if (entry.isDirectory()) walk(full)
-      else if (entry.name === 'session.v3.jsonl.zstd' || entry.name === 'session.v3.jsonl') files.push(full)
+      // Harness 0.2.1 bumped the durable session record to format version 4
+      // (delivery-accepted events carry sessionFormatVersion: 4 and the file
+      // is session.v4.jsonl.zstd); keep reading legacy v3 logs so the check
+      // stays valid against both runtimes.
+      else if (/^session\.v[34]\.jsonl(\.zstd)?$/.test(entry.name)) files.push(full)
     }
   }
   for (const root of roots) walk(root)
@@ -465,7 +481,10 @@ function sessionLogFiles(modifiedSince) {
 
 /**
  * Read every recent session log and return the events of the one that
- * received this scenario's commands (matched by the unique objective text).
+ * received this scenario's commands. Match on the scenario's command/run
+ * records rather than the objective text alone: multitask researcher child
+ * sessions quote the objective too, but only the main session records
+ * command/run.
  */
 function findScenarioLog(modifiedSince) {
   for (const file of sessionLogFiles(modifiedSince)) {
@@ -476,9 +495,10 @@ function findScenarioLog(modifiedSince) {
       continue // torn final frame mid-write; the poll retries
     }
     const events = parseSessionLog(text)
-    if (events.some((event) => JSON.stringify(event.data ?? {}).includes(String(EPOCH)))) {
-      return { file, events }
-    }
+    const receivedCommands = events.some(
+      (event) => event.type === 'command/run' && JSON.stringify(event.data ?? {}).includes(String(EPOCH))
+    )
+    if (receivedCommands) return { file, events }
   }
   return undefined
 }
@@ -681,31 +701,45 @@ try {
   log(`check-multitask-command: /multitask listed in the composer menu: ${JSON.stringify(multitaskRow)}`)
   if (!(await clearComposer(endpoint))) fail('the composer could not be cleared after the menu probes')
 
+  // Success results are read through the task-card surface (see the taskCards
+  // helper note): the objective proves the card belongs to this invocation and
+  // a non-failed card is the success equivalent of the retired command card's
+  // data-state="ok".
+  const taskCardFor = async (objective, label) => evaluateUntil(
+    endpoint,
+    async () => {
+      const cards = await pageCall(endpoint, 'taskCards')
+      return cards.find((card) => !card.failed && card.title.includes(objective)) ?? false
+    },
+    label,
+    CARD_DEADLINE_MS
+  )
+
   // Phase 3b: execute /multitask <objective A> through the composer — host
   // dispatch via commands/execute, no model turn. Task ordinals fold from the
   // session's existing events, so the minted ids are read from the cards (a
   // reused dev session may already hold earlier multitask tasks).
   await typeLine(endpoint, `/multitask ${OBJECTIVE_A}`)
   await pressEnter(endpoint)
-  const cardA = await evaluateUntil(
-    endpoint,
-    async () => {
-      const cards = await pageCall(endpoint, 'commandCards')
-      return cards.find((card) => card.state === 'ok' && card.title.includes(OBJECTIVE_A)) ?? false
-    },
-    'the objective A success command card to render',
-    CARD_DEADLINE_MS
-  )
-  for (const token of ['multitask', OBJECTIVE_A, 'queued', 'research', 'implementation', 'orchestrator']) {
-    if (!cardA.title.includes(token)) {
-      fail(`the objective A command card is missing ${JSON.stringify(token)}; card text: ${JSON.stringify(cardA.title.slice(0, 600))}`)
-    }
+  const cardA = await taskCardFor(OBJECTIVE_A, 'the objective A task card to render')
+  // The task card is the multitask pipeline surface: the phase attribute must
+  // carry the live pipeline vocabulary and the rendered text must expose the
+  // objective (replacing the retired command-summary token assertions, whose
+  // research/implementation/orchestrator wording predates 5963df7's phase set).
+  if (!['queued', 'researching', 'orchestrating', 'writing', 'verifying', 'done'].includes(cardA.phase)) {
+    fail(`the objective A task card carries phase ${JSON.stringify(cardA.phase)}; expected the multitask pipeline vocabulary`)
   }
-  const idA = /MT-([1-9][0-9]*)/.exec(cardA.title)?.[1]
+  // The wide layout renders the objective as its own body line (no label);
+  // the narrow pre layout formats it as "Objective: ...". Require the
+  // objective text itself, which both layouts render.
+  if (!cardA.title.includes(OBJECTIVE_A)) {
+    fail(`the objective A task card does not render the objective; card text: ${JSON.stringify(cardA.title.slice(0, 600))}`)
+  }
+  const idA = /MT-([1-9][0-9]*)/.exec(cardA.id || cardA.title)?.[1]
   if (idA === undefined) {
     fail(`the objective A card does not name a minted task id: ${JSON.stringify(cardA.title.slice(0, 300))}`)
   }
-  log(`check-multitask-command: standard command chat node rendered the ${`MT-${idA}`} success card`)
+  log(`check-multitask-command: task card chat node rendered the ${`MT-${idA}`} success card`)
 
   // Phase 3c: empty objective. A whitespace-only /multitask line is BARE after
   // trim, so the composer's enter adjudication routes it through the leading
@@ -715,10 +749,7 @@ try {
   // pair asserted below. In the renderer this build surfaces claimed-route
   // errors without a persistent flow node or toast, so the observable here is
   // the absence: no multitask card appears and no ordinal is minted.
-  const multitaskCardCount = async () => {
-    const cards = await pageCall(endpoint, 'commandCards')
-    return cards.filter((card) => card.title.startsWith('multitask')).length
-  }
+  const multitaskCardCount = async () => (await pageCall(endpoint, 'taskCards')).length
   const cardCountBefore = await multitaskCardCount()
   await typeLine(endpoint, '/multitask')
   await pressEnter(endpoint)
@@ -734,24 +765,19 @@ try {
   // Phase 3d: a second objective mints the NEXT ordinal in the same session.
   await typeLine(endpoint, `/multitask ${OBJECTIVE_B}`)
   await pressEnter(endpoint)
-  const cardB = await evaluateUntil(
-    endpoint,
-    async () => {
-      const cards = await pageCall(endpoint, 'commandCards')
-      return cards.find((card) => card.state === 'ok' && card.title.includes(OBJECTIVE_B)) ?? false
-    },
-    'the objective B success command card to render',
-    CARD_DEADLINE_MS
-  )
-  const idB = /MT-([1-9][0-9]*)/.exec(cardB.title)?.[1]
+  const cardB = await taskCardFor(OBJECTIVE_B, 'the objective B task card to render')
+  const idB = /MT-([1-9][0-9]*)/.exec(cardB.id || cardB.title)?.[1]
   if (idB === undefined || Number(idB) !== Number(idA) + 1) {
     fail(`the second invocation minted ${idB === undefined ? 'no id' : `MT-${idB}`}; expected the successor of MT-${idA}`)
   }
   log(`check-multitask-command: second invocation rendered the ${`MT-${idB}`} success card`)
 
   // Phase 3e: start a real model turn, confirm the composed app exposes its
-  // running controls before invoking the command, keep the command wholly
-  // inside that turn, then prove the complete ordering in the durable log.
+  // running controls before invoking the command, and keep the command wholly
+  // inside that turn. The durable ordering proof moved to phase 4 below:
+  // Harness 0.2.1 buffers the session record and only drains on explicit
+  // flush paths (for example title flows) or teardown, so no mid-turn read
+  // can observe the turn/start while the turn is running.
   await typeLine(endpoint, BUSY_PROMPT)
   await pressEnter(endpoint)
   await evaluateUntil(
@@ -760,44 +786,14 @@ try {
     'the composer to expose the running-turn controls',
     CARD_DEADLINE_MS
   )
-  const busyStarted = await evaluateUntil(
-    endpoint,
-    async () => {
-      const found = findScenarioLog(startedAt)
-      if (found === undefined) return false
-      const ingress = found.events.find(
-        (event) => event.type === 'agent/inbox/spliced' && isBusyPromptEvent(event)
-      )
-      const start = found.events.find(
-        (event) => event.type === 'turn/start' && ingress !== undefined && event.seq > ingress.seq
-      )
-      const end = found.events.find(
-        (event) => event.type === 'turn/end' && start !== undefined
-          && event.data.turn === start.data.turn && event.seq > start.seq
-      )
-      return start !== undefined && end === undefined
-        ? { startSeq: start.seq, turn: start.data.turn }
-        : false
-    },
-    'a durable turn/start for the real busy-turn prompt (a configured live model is required)',
-    LOG_POLL_DEADLINE_MS
-  )
   await typeLine(endpoint, `/multitask ${OBJECTIVE_BUSY}`)
   await pressEnter(endpoint)
-  const busyCard = await evaluateUntil(
-    endpoint,
-    async () => {
-      const cards = await pageCall(endpoint, 'commandCards')
-      return cards.find((card) => card.state === 'ok' && card.title.includes(OBJECTIVE_BUSY)) ?? false
-    },
-    'the busy-turn multitask success card to render',
-    CARD_DEADLINE_MS
-  )
-  if (!busyCard.title.includes('queued')) fail('the busy-turn command card is not a queued success result')
+  const busyCard = await taskCardFor(OBJECTIVE_BUSY, 'the busy-turn multitask task card to render')
+  if (busyCard.failed) fail('the busy-turn task card is a failure result')
   if (!(await pageCall(endpoint, 'turnRunning'))) {
     fail('the real model turn was no longer running when the busy-turn command settled')
   }
-  log(`check-multitask-command: busy-turn command settled after durable turn/start seq ${busyStarted.startSeq} while the real model turn remained running`)
+  log('check-multitask-command: busy-turn command settled while the real model turn remained running')
 
   // The attachment intake is disabled while a model turn is running. Wait
   // for this same real turn to finish before exercising the document-level
@@ -820,23 +816,17 @@ try {
   )
   await typeLine(endpoint, `/multitask ${OBJECTIVE_ATTACHMENT}`)
   await pressEnter(endpoint)
-  const attachmentCard = await evaluateUntil(
-    endpoint,
-    async () => {
-      const cards = await pageCall(endpoint, 'commandCards')
-      return cards.find((card) => card.state === 'ok' && card.title.includes(OBJECTIVE_ATTACHMENT)) ?? false
-    },
-    'the attachment-bearing multitask success card to render',
-    CARD_DEADLINE_MS
-  )
-  if (!attachmentCard.title.includes('queued')) fail('the attachment-bearing command card is not a queued success result')
-  log(`check-multitask-command: attachment-bearing invocation admitted ${ATTACHMENT_NAME} and rendered a success card`)
+  const attachmentCard = await taskCardFor(OBJECTIVE_ATTACHMENT, 'the attachment-bearing multitask task card to render')
+  if (attachmentCard.failed) fail('the attachment-bearing task card is a failure result')
+  log(`check-multitask-command: attachment-bearing invocation admitted ${ATTACHMENT_NAME} and rendered a task card`)
 
-  // Phase 4: the durable session log on disk. Buffers drain at ordinary
-  // checkpoints, so poll live first; teardown below also forces a drain and
-  // the post-teardown pass re-checks before this script reports. Assertions
-  // scope to this scenario's events (objectives carry the unique epoch), so
-  // the check is valid on a reused dev session too.
+  // Phase 4: the durable session log on disk. Harness 0.2.1 persists through
+  // the dsh-session-persistence-jsonl writer, whose buffer drains only on
+  // explicit flush paths (for example title flows) or teardown — a mid-run
+  // read usually cannot see this scenario's events yet. teardownDevApp()
+  // below forces the drain, and the post-teardown pass re-checks before this
+  // script reports. Assertions scope to this scenario's events (objectives
+  // carry the unique epoch), so the check is valid on a reused dev session.
   const assertScenarioLog = (found) => {
     const { file, events } = found
 
@@ -951,15 +941,29 @@ try {
       && taskBusy.seq < doneBusy.seq && doneBusy.seq < busyEnd.seq)) {
       fail(`busy-turn ordering mismatch: ingress ${busyIngress.seq}, start ${busyStart.seq}, message ${busyMessage.seq}, run ${runBusy.seq}, task ${taskBusy.seq}, done ${doneBusy.seq}, end ${busyEnd.seq}`)
     }
+    // Attribution rule for in-window user/message and agent/inbox/spliced
+    // events: the busy command's own queued task legitimately spawns a
+    // researcher whose report arrives mid-turn as a relayed "Agent … sent a
+    // message" record (the designed next-turn fold), and the running turn's
+    // own step flow appends ordinary user/message records. An event therefore
+    // only counts as a command effect on the running turn when it carries the
+    // command's objective AND is not a child-agent relay — that shape would
+    // mean the command queued a prompt instead of a task. A nested turn/start
+    // or any followup/steer/abort control effect is a violation by type alone;
+    // researcher machinery (subagent/descriptor, relay splices) is already
+    // covered by the run → task → done enclosure below.
+    const isRelayRecord = (event) => /sent a message:/u.test(JSON.stringify(event.data ?? {}))
     const busyWindowEffects = events.filter((event) => event.seq > runBusy.seq && event.seq < busyEnd.seq
-      && (event.type === 'turn/start' || event.type === 'user/message' || event.type === 'agent/inbox/spliced'
-        || event.type === 'subagent/descriptor' || /(followup|steer|abort)/iu.test(event.type)))
+      && (event.type === 'turn/start'
+        || /(followup|steer|abort)/iu.test(event.type)
+        || ((event.type === 'user/message' || event.type === 'agent/inbox/spliced')
+          && !isRelayRecord(event) && JSON.stringify(event.data ?? {}).includes(OBJECTIVE_BUSY))))
     if (busyWindowEffects.length > 0) {
       fail(`the busy-turn command changed the running turn: ${busyWindowEffects.map((event) => `${event.seq}:${event.type}`).join(', ')}`)
     }
     if (busyEnd.data.reason?.kind === 'interrupted') fail('the real busy turn ended as interrupted')
     if (doneBusy.data.kind !== 'success') fail(`the busy-turn command settled as ${JSON.stringify(doneBusy.data.kind)}`)
-    log(`check-multitask-command: PASS busy-turn public seam (turn ${busyStart.data.turn}: ${busyStart.seq} < command/run ${runBusy.seq} < multitask/task ${taskBusy.seq} < command/done ${doneBusy.seq} < turn/end ${busyEnd.seq}; original input unchanged; no queued message/followup/steer/abort/researcher)`)
+    log(`check-multitask-command: PASS busy-turn public seam (turn ${busyStart.data.turn}: ${busyStart.seq} < command/run ${runBusy.seq} < multitask/task ${taskBusy.seq} < command/done ${doneBusy.seq} < turn/end ${busyEnd.seq}; original input unchanged; no nested turn, queued prompt, followup/steer/abort)`)
 
     // Attachment admission public-seam evidence: lifecycle success encloses
     // exactly the task event, whose frozen payload cannot persist or forward
@@ -981,18 +985,34 @@ try {
     }
     log(`check-multitask-command: PASS attachment admission public seam (${runAttachment.seq} command/run < ${taskAttachment.seq} multitask/task < ${doneAttachment.seq} command/done(success); no attachment rejection/content)`)
 
-    // The command never reaches the model: the model-visible surface (user
-    // messages, turns) carries neither the raw command line nor an objective,
-    // and no turn/start falls in any invocation's execution window (the
-    // command opened no model turn). The usage text inside a command/done
-    // record legitimately mentions `/multitask`, so the surface check is
-    // scoped to the model-visible event types.
+    // The command never reaches the model: within this scenario's command
+    // window, the model-visible surface (user messages, turns, assistant
+    // messages) carries neither the raw command line nor an objective.
+    // Harness 0.2.1 relays child-agent reports into the parent transcript as
+    // "Agent … sent a message" user/message records — the designed task-fold
+    // mechanism — and those legitimately quote the objective, so relayed
+    // records are exempt from the objective clause (the typed command line
+    // must never appear even there). Window scoping keeps earlier runs'
+    // records out: the dev session is reused across checks. The command-line
+    // clause tests the verbatim typed line per objective — relayed child
+    // prose can legitimately mention the command by name, but the composer's
+    // exact `/multitask <objective>` input reaching the model surface is a
+    // leak. The usage text inside a command/done record legitimately mentions
+    // `/multitask`, so the surface check is scoped to the model-visible event
+    // types.
+    const commandLines = [OBJECTIVE_A, OBJECTIVE_B, OBJECTIVE_BUSY, OBJECTIVE_ATTACHMENT]
+      .map((objective) => `/multitask ${objective}`)
     for (const event of events) {
       if (!['user/message', 'turn/start', 'assistant/message'].includes(event.type)) continue
+      if (!(event.seq >= runA.seq && event.seq <= doneAttachment.seq)) continue
       const text = JSON.stringify(event.data ?? {})
-      if (text.includes('/multitask') || text.includes(OBJECTIVE_A) || text.includes(OBJECTIVE_B)
+      if (commandLines.some((line) => text.includes(line))) {
+        fail(`the command line leaked into the model-visible ${event.type} event: ${text.slice(0, 200)}`)
+      }
+      if (isRelayRecord(event)) continue
+      if (text.includes(OBJECTIVE_A) || text.includes(OBJECTIVE_B)
         || text.includes(OBJECTIVE_BUSY) || text.includes(OBJECTIVE_ATTACHMENT)) {
-        fail(`the command line or an objective leaked into the model-visible ${event.type} event: ${text.slice(0, 200)}`)
+        fail(`an objective leaked into the model-visible ${event.type} event: ${text.slice(0, 200)}`)
       }
     }
     for (const [run, done] of [[runA, doneA], [rejected, rejectedDone], [runB, doneB]]) {
@@ -1007,20 +1027,22 @@ try {
   }
 
   let verified = false
-  for (let waited = 0; waited < LOG_POLL_DEADLINE_MS; waited += 3_000) {
+  let lastError
+  for (let waited = 0; waited < LOG_POLL_DEADLINE_MS && !verified; waited += 3_000) {
     const found = findScenarioLog(startedAt)
-    if (found !== undefined) {
-      try {
-        assertScenarioLog(found)
-        verified = true
-        break
-      } catch (error) {
-        // A torn or partially drained log mid-write can fail an assertion;
-        // retry until the deadline before treating it as a product failure.
-        if (Date.now() - startedAt > LOG_POLL_DEADLINE_MS) throw error
-      }
+    if (found === undefined) {
+      sleep(3_000)
+      continue
     }
-    sleep(3_000)
+    try {
+      assertScenarioLog(found)
+      verified = true
+    } catch (error) {
+      // A read that raced a flush can see only part of the scenario; keep
+      // polling until the deadline, then let the post-teardown pass decide.
+      lastError = error
+      sleep(3_000)
+    }
   }
 
   await teardownDevApp()
@@ -1041,10 +1063,11 @@ try {
     fail(
       [
         `no session log received this scenario's commands (objectives carry the epoch ${EPOCH}).`,
+        lastError === undefined ? undefined : `Last durable-record mismatch: ${lastError.message}`,
         `Looked under: ${sessionsRootCandidates().join(', ')}`,
         'Captured dev output (tail):',
         ...devOutput.slice(-15).map((line) => `  | ${line}`)
-      ].join('\n')
+      ].filter(Boolean).join('\n')
     )
   }
 

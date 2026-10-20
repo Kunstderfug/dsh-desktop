@@ -618,7 +618,13 @@ export function registerClaims(ctx) {
   ctx.on?.('agent/created', ({ agent }) => {
     attachClaimTools(ctx, service, agent)
     if (hasOpenTasks(agent.session) && agent.session.header.origin !== 'subagent') {
-      void service.reconcile(agent.session)
+      // 0.2.1: SubagentRuntime.listDescendants resolves the sessionQuery
+      // service and throws while that fiber is still activating
+      // (SUBAGENT_CONTROL_QUERY_UNAVAILABLE). This expiry is advisory — the
+      // claims guard re-reconciles before each decision and the projection
+      // fold stays authoritative — so a transient listing failure must not
+      // become an unhandled rejection that kills the host.
+      service.reconcile(agent.session).catch(() => {})
     }
   })
 }

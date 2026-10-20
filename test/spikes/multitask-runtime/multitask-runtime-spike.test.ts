@@ -22,11 +22,12 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { type GenerateOptions, LlmAdapter, LlmRuntime, type StreamChunk, type UserMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { StubWorkingDirectory } from '../../helpers/working-directory-stub'
 import * as subagentSpawnInProcess from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -245,6 +246,9 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
   const loop = ctx.plugin(AgentLoop)
   await loop
   pushCore('loop', () => loop.dispose())
+  const workingDirectory = ctx.plugin(StubWorkingDirectory, home)
+  await workingDirectory
+  pushCore('working-directory', () => workingDirectory.dispose())
   const subagents = ctx.plugin(SubagentRuntime)
   await subagents
   const disposeSubagents = pushCore('subagents', async () => {
@@ -293,7 +297,7 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
 
 /** Spawn one continuable researcher child off a parent through the real seam. */
 function spawnResearcher(f: Fixture, parent: Agent, promptText: string) {
-  return f.ctx.subagents.startContinuable({
+  return f.ctx.subagents.startActivation({
     provider: 'spawn',
     label: 'spike researcher',
     request: {
@@ -301,7 +305,8 @@ function spawnResearcher(f: Fixture, parent: Agent, promptText: string) {
       parent,
       agentOptions: { model: 'researcher' }
     },
-    signal: new AbortController().signal
+    signal: new AbortController().signal,
+    delivery: 'parent'
   })
 }
 

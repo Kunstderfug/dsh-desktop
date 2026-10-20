@@ -28,7 +28,7 @@ import {
   type StreamChunk,
   ToolCallId
 } from '@deepseek-ai/dsh-llm'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -37,6 +37,7 @@ import * as subagentSpawnInProcess from '@deepseek-ai/dsh-subagent-spawn-in-proc
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
 import * as multitask from '../packages/dsh-multitask/index.js'
+import { StubWorkingDirectory } from './helpers/working-directory-stub'
 
 const CLAIM_TOOLS = ['claim_files', 'release_files', 'list_file_claims'] as const
 const STRUCTURED_REPORT = [
@@ -165,6 +166,9 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
 
   const loop = await ctx.plugin(AgentLoop)
   pushCore(() => loop.dispose())
+  // 0.2.1 SubagentRuntime injects workingDirectory; the stub keeps this fixture focused.
+  const workingDirectory = await ctx.plugin(StubWorkingDirectory, home)
+  pushCore(() => workingDirectory.dispose())
   const subagents = await ctx.plugin(SubagentRuntime)
   pushCore(() => (subagents as { dispose(): Promise<void> }).dispose())
   const spawn = await ctx.plugin(subagentSpawnInProcess as unknown as Parameters<Context['plugin']>[0])
@@ -296,23 +300,25 @@ function projectionClaims(ctx: Context, agent: Agent): Array<Record<string, unkn
 async function launchTwoHeldChildren(f: Fixture, parent: Agent) {
   await runCommand(f, parent, '/multitask implement shared file A')
   await runCommand(f, parent, '/multitask implement shared file B')
-  const startA = await f.ctx.subagents.startContinuable({
+  const startA = await f.ctx.subagents.startActivation({
     provider: 'spawn',
     label: 'writer-a',
     request: {
       prompt: [{ type: 'text', text: 'writer A stays live to claim files' }],
       parent
     },
-    signal: new AbortController().signal
+    signal: new AbortController().signal,
+    delivery: 'parent'
   })
-  const startB = await f.ctx.subagents.startContinuable({
+  const startB = await f.ctx.subagents.startActivation({
     provider: 'spawn',
     label: 'writer-b',
     request: {
       prompt: [{ type: 'text', text: 'writer B stays live to claim files' }],
       parent
     },
-    signal: new AbortController().signal
+    signal: new AbortController().signal,
+    delivery: 'parent'
   })
   const childIds = [String(startA.childId), String(startB.childId)]
   await waitFor(() => childIds.every(id => f.ctx.agents.get(SessionId(id)) !== undefined), 'live writer agents')
@@ -426,7 +432,7 @@ describe('multitask_claims_registry_gate lifecycle and expiry', () => {
     expect(projectionClaims(f.ctx, parent).some(claim => claim.path === 'src/a.ts' && claim.taskId === 'MT-2')).toBe(true)
 
     await runTool(f.ctx, childA, 'claim_files', { paths: ['src/live.ts'], taskId: 'MT-1' })
-    await f.ctx.subagents.drainContinuableChildren(parent, [SessionId(childIds[1]!)])
+    await f.ctx.subagents.drainChildren(parent, [SessionId(childIds[1]!)])
     await waitFor(async () => {
       const children = await f.ctx.subagents.listDescendants(parent.id)
       const dead = children.find(entry => entry.kind === 'child' && entry.id === childIds[1])

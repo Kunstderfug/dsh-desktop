@@ -32,11 +32,12 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import Commands from '@deepseek-ai/dsh-commands'
 import type { CommandExecution } from '@deepseek-ai/dsh-commands'
 import { type GenerateOptions, createUserMessage, LlmAdapter, LlmRuntime, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { StubWorkingDirectory } from '../../helpers/working-directory-stub'
 import * as subagentSpawnInProcess from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -134,6 +135,8 @@ async function fixture(): Promise<{ ctx: Context, home: string, calls: Array<{ m
 
   const loop = track(ctx.plugin(AgentLoop))
   await loop
+  const workingDirectory = track(ctx.plugin(StubWorkingDirectory, home))
+  await workingDirectory
   const subagents = track(ctx.plugin(SubagentRuntime))
   await subagents
   const spawn = track(ctx.plugin(subagentSpawnInProcess as unknown as Parameters<Context['plugin']>[0]))

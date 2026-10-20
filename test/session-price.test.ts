@@ -95,7 +95,10 @@ async function chatExports(): Promise<ChatExports> {
   const presentationOnly = new Set([
     '@deepseek-ai/dsh-client-ui-primitives',
     '@deepseek-ai/dsh-client-store',
-    'react-dom'
+    'react-dom',
+    // 0.2.1 chat imports the virtualizer hook at module scope; the price
+    // fold never renders a list, so the presentation stub covers it.
+    '@tanstack/react-virtual'
   ])
   interface PresentationStub {
     (...args: unknown[]): unknown

@@ -1,4 +1,24 @@
 /**
+ * Deny writer tools inside a live researcher child.
+ *
+ * Harness 0.2.1 removed the per-child `toolFilter`, so the read-only contract
+ * is enforced here instead: the researcher plugin registers each child id at
+ * spawn and the guard refuses the writer tools the retired filter denied.
+ *
+ * @param exec - candidate tool execution.
+ * @returns a structured denial, or undefined when the call is allowed.
+ */
+function researcherWriteDenial(exec) {
+  const sessionId = exec?.agent?.session?.id
+  if (!isResearcherChild(sessionId)) return undefined
+  if (!RESEARCHER_DENIED_TOOLS.includes(exec?.name)) return undefined
+  return {
+    kind: 'deny',
+    reason: formatResearcherRefusal(String(exec?.name))
+  }
+}
+
+/**
  * Writer-admission guardrails for the [multitask] host plugin (issue #10).
  *
  * One controller owns capacity: live descendant writers plus parent-keyed
@@ -13,7 +33,13 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { Service } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { effectiveClaims } from './claims.js'
-import { RESEARCHER_LABEL } from './researcher.js'
+import {
+  formatResearcherRefusal,
+  isResearcherChild,
+  releaseResearcherChild,
+  RESEARCHER_DENIED_TOOLS,
+  RESEARCHER_LABEL
+} from './researcher.js'
 import { latestTask, renderHandoffPrompt } from './round-driver.js'
 
 /** Plugin config default for `multitask.maxWriters`. */
@@ -26,8 +52,14 @@ export const WRITER_CAP_CODE = 'WRITER_CAP'
 export const WRITER_TOOL_NAME = 'subagent'
 
 const admission = new AsyncLocalStorage()
-const wrappedRuntimes = new WeakSet()
-const wrappedToolRuntimes = new WeakSet()
+// 0.2.1 cordis returns a fresh callable-proxy object from `ctx.get(name)` on
+// every call, so WeakSet identity dedupe never hits and repeated `ensureWrapped`
+// calls stack wrapper layers (each layer fired onWriterStart once, producing the
+// 109 duplicate `multitask/phase` appends in the 0.2.1-rc.2 task-card run).
+// Mark the installed functions instead: property writes persist to the
+// underlying service, so the marker survives proxy re-instantiation.
+const WRAPPED_EXECUTE_MARKER = Symbol('dsh-multitask.guardrails.wrappedExecute')
+const WRAPPED_ACTIVATION_MARKER = Symbol('dsh-multitask.guardrails.wrappedActivation')
 
 /**
  * Resolve `maxWriters`. Omitted values default to 2; invalid limits fail closed.
@@ -247,6 +279,7 @@ export class MultitaskGuardrails extends Service {
 
   releaseChild(childId) {
     const id = String(childId)
+    releaseResearcherChild(id)
     for (const [key, reservation] of this.reservations) {
       if (reservation.childId === id) this.reservations.delete(key)
     }
@@ -268,6 +301,8 @@ export class MultitaskGuardrails extends Service {
 
   async onPreExecute(exec, next) {
     this.ensureWrapped()
+    const researcherDenial = researcherWriteDenial(exec)
+    if (researcherDenial !== undefined) return researcherDenial
     if (exec?.name !== WRITER_TOOL_NAME) return next()
     if (this.pendingByExec.has(exec)) return next()
     const agent = exec.agent
@@ -305,11 +340,10 @@ export class MultitaskGuardrails extends Service {
 
   ensureWrapped() {
     const tools = this.ctx.get?.('tools')
-    if (tools != null && !wrappedToolRuntimes.has(tools)) {
-      wrappedToolRuntimes.add(tools)
+    if (tools != null && !tools.execute?.[WRAPPED_EXECUTE_MARKER]) {
       const originalExecute = tools.execute.bind(tools)
       const self = this
-      tools.execute = async (input) => {
+      const wrappedExecute = async (input) => {
         if (input?.name !== WRITER_TOOL_NAME || input.agent == null) return originalExecute(input)
         const paths = self.protectedPaths(input.agent)
         return originalExecute({
@@ -317,18 +351,18 @@ export class MultitaskGuardrails extends Service {
           arguments: sanitizeToolArguments(input.arguments, paths)
         })
       }
+      wrappedExecute[WRAPPED_EXECUTE_MARKER] = true
+      tools.execute = wrappedExecute
     }
     const subagents = this.ctx.get?.('subagents')
-    if (subagents == null || wrappedRuntimes.has(subagents)) return
-    wrappedRuntimes.add(subagents)
-    const originalContinuable = subagents.startContinuable.bind(subagents)
-    const originalStart = subagents.start.bind(subagents)
+    if (subagents == null || subagents.startActivation?.[WRAPPED_ACTIVATION_MARKER]) return
+    const originalActivation = subagents.startActivation.bind(subagents)
     const self = this
-    subagents.startContinuable = async (spec) => {
+    const wrappedActivation = async (spec) => {
       const parentId = String(spec?.request?.parent?.session?.id ?? spec?.parent?.session?.id ?? '')
       const store = admission.getStore() ?? (parentId.length > 0 ? self.inflightByParent.get(parentId) : undefined)
       try {
-        const result = await originalContinuable(spec)
+        const result = await originalActivation(spec)
         if (store != null && !isResearcherSpec(spec)) {
           self.bindChild(store.reservationId, result?.childId)
           if (store.parentId != null) self.inflightByParent.delete(store.parentId)
@@ -349,15 +383,8 @@ export class MultitaskGuardrails extends Service {
         throw error
       }
     }
-    subagents.start = async (provider, request) => {
-      const store = admission.getStore()
-      try {
-        return await originalStart(provider, request)
-      } catch (error) {
-        if (store != null) self.releaseReservation(store.reservationId)
-        throw error
-      }
-    }
+    wrappedActivation[WRAPPED_ACTIVATION_MARKER] = true
+    subagents.startActivation = wrappedActivation
   }
 
   install(ctx) {

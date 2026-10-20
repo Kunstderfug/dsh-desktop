@@ -37,7 +37,7 @@ import {
   ToolCallId
 } from '@deepseek-ai/dsh-llm'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -52,6 +52,7 @@ import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import BashLocal from '@deepseek-ai/dsh-bash-local'
 import * as shellEnv from '@deepseek-ai/dsh-shell-env'
 import * as multitask from '../packages/dsh-multitask/index.js'
+import { StubWorkingDirectory } from './helpers/working-directory-stub'
 
 const REMEDY = 'ask the orchestrator or claim a different path'
 const STRUCTURED_REPORT = [
@@ -335,6 +336,9 @@ async function fixture(options: {
   push(() => mounted.dispose())
   const observed = await ctx.plugin(observationPolicy as unknown as Parameters<Context['plugin']>[0])
   push(() => observed.dispose())
+  // 0.2.1 SubagentRuntime injects workingDirectory; the stub keeps this fixture focused.
+  const workingDirectory = await ctx.plugin(StubWorkingDirectory, home)
+  push(() => workingDirectory.dispose())
   const subagents = await ctx.plugin(SubagentRuntime)
   push(() => (subagents as { dispose(): Promise<void> }).dispose())
   const spawn = await ctx.plugin(subagentSpawnInProcess as unknown as Parameters<Context['plugin']>[0])
@@ -374,23 +378,25 @@ async function fixture(options: {
 async function launchTwoHeldChildren(f: Fixture, hold: { promise: Promise<void> }) {
   await runCommand(f.ctx, f.agent, '/multitask implement shared file A')
   await runCommand(f.ctx, f.agent, '/multitask implement shared file B')
-  const startA = await f.ctx.subagents.startContinuable({
+  const startA = await f.ctx.subagents.startActivation({
     provider: 'spawn',
     label: 'writer-a',
     request: {
       prompt: [{ type: 'text', text: 'writer A stays live to claim files' }],
       parent: f.agent
     },
-    signal: new AbortController().signal
+    signal: new AbortController().signal,
+    delivery: 'parent'
   })
-  const startB = await f.ctx.subagents.startContinuable({
+  const startB = await f.ctx.subagents.startActivation({
     provider: 'spawn',
     label: 'writer-b',
     request: {
       prompt: [{ type: 'text', text: 'writer B stays live to claim files' }],
       parent: f.agent
     },
-    signal: new AbortController().signal
+    signal: new AbortController().signal,
+    delivery: 'parent'
   })
   const childIds = [String(startA.childId), String(startB.childId)]
   await waitFor(() => childIds.every(id => f.ctx.agents.get(SessionId(id)) !== undefined), 'live writer agents')
@@ -540,23 +546,25 @@ describe('multitask_claim_enforcement_gate release-on-settle', () => {
     await runCommand(f.ctx, f.agent, '/multitask implement shared file A')
     await runCommand(f.ctx, f.agent, '/multitask implement shared file B')
     holdNewWriters = true
-    const startA = await f.ctx.subagents.startContinuable({
+    const startA = await f.ctx.subagents.startActivation({
       provider: 'spawn',
       label: 'writer-a',
       request: {
         prompt: [{ type: 'text', text: 'writer A stays live to claim files' }],
         parent: f.agent
       },
-      signal: new AbortController().signal
+      signal: new AbortController().signal,
+      delivery: 'parent'
     })
-    const startB = await f.ctx.subagents.startContinuable({
+    const startB = await f.ctx.subagents.startActivation({
       provider: 'spawn',
       label: 'writer-b',
       request: {
         prompt: [{ type: 'text', text: 'writer B stays live to claim files' }],
         parent: f.agent
       },
-      signal: new AbortController().signal
+      signal: new AbortController().signal,
+      delivery: 'parent'
     })
     const childIds = [String(startA.childId), String(startB.childId)]
     await waitFor(() => childIds.every(id => f.ctx.agents.get(SessionId(id)) !== undefined), 'live writer agents')
@@ -579,7 +587,7 @@ describe('multitask_claim_enforcement_gate release-on-settle', () => {
     if (settle !== 'refusal') {
       await waitFor(() => ends.has(childIds[0]!) === false && childA.status !== undefined, 'writer A admitted')
       if (settle === 'aborted') {
-        await f.ctx.subagents.drainContinuableChildren(f.agent, [SessionId(childIds[0]!)])
+        await f.ctx.subagents.drainChildren(f.agent, [SessionId(childIds[0]!)])
       } else if (settle === 'cancelled') {
         childA.cancel({ kind: 'user' })
       }
@@ -628,14 +636,15 @@ describe('multitask_claim_enforcement_gate release-on-settle', () => {
     expect(researched.stopReason).toBe('completed')
     expect(researchEvents(f.agent).every(event => event.phase !== 'research-failed')).toBe(true)
 
-    const startB = await f.ctx.subagents.startContinuable({
+    const startB = await f.ctx.subagents.startActivation({
       provider: 'spawn',
       label: 'writer-b',
       request: {
         prompt: [{ type: 'text', text: 'writer B stays live to claim files' }],
         parent: f.agent
       },
-      signal: new AbortController().signal
+      signal: new AbortController().signal,
+      delivery: 'parent'
     })
     await waitFor(() => f.ctx.agents.get(startB.childId) !== undefined, 'live unrelated writer')
     const childB = f.ctx.agents.get(startB.childId)!

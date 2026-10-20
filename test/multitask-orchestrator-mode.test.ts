@@ -31,7 +31,7 @@ import {
   type ToolSchema,
   ToolCallId
 } from '@deepseek-ai/dsh-llm'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SessionStore, { SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
@@ -40,6 +40,7 @@ import * as subagentSpawnInProcess from '@deepseek-ai/dsh-subagent-spawn-in-proc
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
 import * as multitask from '../packages/dsh-multitask/index.js'
+import { StubWorkingDirectory } from './helpers/working-directory-stub'
 
 const STRUCTURED_REPORT = [
   'Goal: implement the orchestrator-mode brief',
@@ -161,6 +162,9 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
 
   const loop = await ctx.plugin(AgentLoop)
   pushCore(() => loop.dispose())
+  // 0.2.1 SubagentRuntime injects workingDirectory; the stub keeps this fixture focused.
+  const workingDirectory = await ctx.plugin(StubWorkingDirectory, home)
+  pushCore(() => workingDirectory.dispose())
   const subagents = await ctx.plugin(SubagentRuntime)
   pushCore(() => (subagents as { dispose(): Promise<void> }).dispose())
   const spawn = await ctx.plugin(subagentSpawnInProcess as unknown as Parameters<Context['plugin']>[0])

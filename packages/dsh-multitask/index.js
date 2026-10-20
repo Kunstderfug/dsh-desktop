@@ -20,9 +20,10 @@
  *   handler owns no further attachment grammar, and
  * - the researcher spawn (issue #5): when `ctx.subagents` is mounted, the
  *   same handler immediately starts one continuable child via
- *   `startContinuable` (persona + `toolFilter` deny for write/edit/
- *   `str_replace_editor`), appends `researching` with the child id and
- *   label, and maps every supported settlement `stopReason` to
+ *   `startActivation` (persona folded into the prompt, `delivery: 'caller'`,
+ *   and a host-side read-only guard for write/edit/`str_replace_editor`
+ *   because 0.2.1 dropped the per-child `toolFilter`), appends `researching`
+ *   with the child id and label, and maps every supported settlement `stopReason` to
  *   `researched` / `research-failed`. The Harness SubagentRuntime remains
  *   the child lifecycle and persistence owner. The parent retrieves the
  *   full structured report through `sendMessage`, and
@@ -66,6 +67,7 @@ import {
   RESEARCHER_LABEL,
   buildResearcherStartSpec,
   mapResearchSettlement,
+  markResearcherChild,
   shouldRetryResearch
 } from './researcher.js'
 import {
@@ -367,19 +369,9 @@ function noteWriterDispatch(ctx, childId, parentId, taskId) {
  * @param agent - the parent agent whose view anchors the enumeration.
  * @returns known restrictable tool names, or undefined when unresolvable.
  */
-function knownToolNames(ctx, agent) {
-  const tools = ctx.get?.('tools')
-  if (typeof tools?.view !== 'function') return undefined
-  try {
-    return tools.view(agent).restrictableNames
-  } catch {
-    return undefined
-  }
-}
-
 async function launchResearcherRetry(ctx, pending, mode) {
   const subagents = ctx.get?.('subagents')
-  if (typeof subagents?.startContinuable !== 'function') {
+  if (typeof subagents?.startActivation !== 'function') {
     publishTaskFailure(pending.session, pending.task, {
       reason: 'researcher',
       stopReason: 'error',
@@ -389,13 +381,16 @@ async function launchResearcherRetry(ctx, pending, mode) {
     return
   }
   try {
-    const start = await subagents.startContinuable(buildResearcherStartSpec({
+    const start = await subagents.startActivation(buildResearcherStartSpec({
       parent: pending.agent,
       objective: pending.task.objective,
-      knownTools: knownToolNames(ctx, pending.agent),
       signal: new AbortController().signal
     }))
     const childId = String(start.childId)
+    markResearcherChild(childId)
+    start.result?.catch?.(error => {
+      console.error('[multitask] researcher retry child result failed:', error && error.stack ? error.stack : error)
+    })
     pending.session.append('multitask/research', {
       id: pending.task.id,
       objective: pending.task.objective,
@@ -611,15 +606,18 @@ async function executeMultitaskCommand(ctx, invocation, driver, mode) {
 
   let researcherLine = ''
   const subagents = ctx.get?.('subagents')
-  if (typeof subagents?.startContinuable === 'function') {
+  if (typeof subagents?.startActivation === 'function') {
     try {
-      const start = await subagents.startContinuable(buildResearcherStartSpec({
+      const start = await subagents.startActivation(buildResearcherStartSpec({
         parent: invocation.agent,
         objective,
-        knownTools: knownToolNames(ctx, invocation.agent),
         signal: invocation.signal
       }))
       const childId = String(start.childId)
+      markResearcherChild(childId)
+      start.result?.catch?.(error => {
+        console.error('[multitask] researcher child result failed:', error && error.stack ? error.stack : error)
+      })
       invocation.agent.session.append('multitask/research', {
         id: task.id,
         objective,

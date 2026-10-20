@@ -23,11 +23,12 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import Commands from '@deepseek-ai/dsh-commands'
 import { createUserMessage, LlmAdapter, LlmRuntime, ToolCallId } from '@deepseek-ai/dsh-llm'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SessionStore, { SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { workingDirectoryStub } from './multitask-fixture-support.mjs'
 import * as subagentSpawnInProcess from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
@@ -307,6 +308,8 @@ async function compose(options = {}) {
 
   const loop = await ctx.plugin(AgentLoop)
   push(() => loop.dispose())
+  const workingDirectory = await ctx.plugin(workingDirectoryStub, home)
+  push(() => workingDirectory.dispose())
   const subagents = await ctx.plugin(SubagentRuntime)
   push(() => subagents.dispose())
   const spawn = await ctx.plugin(subagentSpawnInProcess)

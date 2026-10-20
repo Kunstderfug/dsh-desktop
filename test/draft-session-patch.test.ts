@@ -24,7 +24,7 @@ describe('draft sessions: durable blank sessions on the host', () => {
   it('materializes the session header at create time', async () => {
     const patch = await readPatch('@deepseek-ai/dsh-api-session-controller')
 
-    expect(patch).toContain('await this.ctx.sessions.flush(adopted.session)')
+    expect(patch).toContain('await this.ctx.sessions.flush(created.agent.session)')
     expect(patch).toContain('durable header flush for new session')
   })
 })
@@ -48,10 +48,11 @@ describe('draft sessions: wipe-proof draft mirror in the conversation bundle', (
   it('restores the draft from the mirror when the store rehydrates empty', async () => {
     const patch = await readPatch('@deepseek-ai/dsh-client-ui-conversation')
 
-    expect(patch).toContain(
-      'const restored = storedDraft !== "" ? storedDraft : readDraftMirror(session.key)'
-    )
+    // 0.2.1 seeds the shell from its own per-Session conversation key; the
+    // desktop patch keeps the wipe-proof mirror as the fallback when that key
+    // was cleared with the Session scope.
     expect(patch).toContain('function readDraftMirror(sessionId)')
+    expect(patch).toContain('readDraftMirror(binding.sessionId)')
   })
 })
 
@@ -96,13 +97,12 @@ describe('draft sessions: sidebar rows under the project folder', () => {
 
     // Old contract (0.1.5-rc.2): the draft check extended the reuse
     // condition — `!archived.includes(summary.id) && draftPreviewOf(summary.id) === ""`.
-    // Upstream 0.2.0-rc.2 turned the reuse loop into a continue-guard and
-    // reads the loop variable `id` instead of `summary.id`, so that string
-    // can no longer appear; the carried patch skips draft-carrying blanks
-    // with an explicit guard. New contract: that guard must stay in the
-    // reuse loop, or New Session resumes a session the sidebar shows as a
-    // draft row.
-    expect(patch).toContain('if (draftPreviewOf(id) !== "") continue;')
+    // 0.2.1 turned the reuse loop into a `.find` predicate over an `option`
+    // record, so the desktop patch keeps the same rule as an early return
+    // instead of a continue-guard. New contract: every reuse path must reject
+    // a draft-carrying blank, or New Session resumes a session the sidebar
+    // shows as a draft row.
+    expect(patch).toContain('return draftPreviewOf(id) === "";')
   })
 
   it('declares the node and locale extensions in the package types', async () => {

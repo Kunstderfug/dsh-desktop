@@ -77,3 +77,75 @@ Harness 版本同步 rc.2。安装后再次比较所有 65 个目标文件，除
 rc.2 的 `dsh-experimental-inspector` 仍拒绝 `globalThis.fetch` 访问器。
 此前定位到的 Billion Context fetch guard 冲突不会因本次依赖升级自动消失；
 本次未加入该问题的独立修复或改动用户插件配置。
+
+## 合并后兼容收敛（2026-10-19/20，分支 `feat/harness-0.2.1-rc.2`）
+
+在 fork 升级提交（`f85f342`）合入本仓库后，对本仓库持有的 multitask 宿主插件与
+检查脚本按 0.2.1 运行时语义做了一次收敛，并修复了一个仅在真实 0.2.1 运行中
+暴露的缺陷。以下改动均为本仓库自有代码的适配，不新增第三方补丁。
+
+### guardrails 包装层叠加修复（关键）
+
+- 根因：0.2.1 cordis 的 `ctx.get(name)` 每次调用返回一个新的 callable proxy
+  （隔离探针确认 `a === b` 为 false，但属性写入会持久到底层服务实例）。
+  `packages/dsh-multitask/guardrails.js` 原用 `WeakSet` 按 `ctx.get('subagents')`
+  结果做已包装去重，proxy 身份每次不同导致去重永不命中：每次 `agent/created`
+  都在 `startActivation`（及 `tools.execute`）上再叠一层包装，一层套一层。
+- 表现：一次成功激活触发 N 次 `onWriterStart`，任务卡会话日志出现 N 条重复
+  `multitask/phase(writing)`。实测一次真实运行累积到 109 层，109 条事件在
+  5 ms 内连续追加（同一 childId、每毫秒一条）。
+- 修复：改用安装函数上的 `Symbol` 标记去重。属性写入持久到服务实例，标记
+  跨 proxy 重建仍然命中；`ensureWrapped` 重复调用与重复 `agent/created` 不再
+  叠层。修复后隔离探针（109 次 `ensureWrapped` + 1 次激活）只回调 1 次。
+- 其余 WeakSet/WeakMap 用法逐一核对：键均为 exec 或 session 对象（
+  `claims-guard.js`、`claims.js`、`orchestrator-mode.js`、`guardrails.js`
+  的 `pendingByExec`），不受 proxy 身份影响。
+
+### 其他收敛修复
+
+- `claims.js`：0.2.1 下 `ctx.get` 在提供 fiber 未激活时可能返回 `undefined`，
+  重启恢复路径的 `void service.reconcile(...)` 曾以未处理 rejection 崩溃；
+  现按“可忽略清理错误”约定以带注释的 `.catch(() => {})` 吞掉该瞬时不可用。
+- `check-multitask-hardening.mjs`：compose 顺序里 `push('working-directory', …)`
+  参数次序按新 core 契约修正。
+- `check-multitask-claims.mjs`：改用 0.2.1 的 `listDescendants`（ enriched 遍历）
+  断言子代理状态，替代仅返回持久化行的 `listChildren`。
+- `check-multitask-mount.mjs`：浏览器内占位符自上游 #11（`5963df7`）起恒被
+  claim 层占据，`data-dsh-multitask-placeholder` 在浏览器中不可达；断言目标
+  改为实际占据者 `[data-dsh-multitask-claim-layer]`。这是既有契约变化，
+  非 0.2.1 回归，测试未放宽。
+- `check-multitask-command.mjs`：同步 0.2.1 会话持久化契约。会话记录自
+  `session.v3.jsonl` 升级为 `session.v4.jsonl.zstd`（`sessionFormatVersion: 4`），
+  文件发现按 v3/v4 后缀同时匹配；0.2.1 的 jsonl 写入端缓冲激进，仅在显式
+  `ctx.sessions.flush()` 路径（提醒投递、标题流）与 teardown 时强制落盘，
+  运行中读取不再保证可见本次事件，因此 busy-turn 的完整持久顺序断言
+  （ingress → `turn/start` → `user/message` → command/run → multitask/task →
+  command/done → `turn/end`）移到 teardown 强制 drain 之后的阶段 4 执行，
+  运行中只保留 `turnRunning` 等 UI 证据与活模型要求。日志定位改为匹配
+  `command/run` 记录（researcher 子会话同样引用目标文本但不会记录
+  command/run）；busy 窗口归因与 model 可见面泄漏断言按 0.2.1 的
+  "Agent … sent a message" 子代理回传（设计的下轮 fold 机制）做窗口与
+  relay 豁免：逐字命令行仍绝对禁止出现在 model 可见面，researcher 子会话
+  转发的目标引用不属于命令泄漏。断言均对应真实契约变化，未放宽。
+
+### 本次验证（macOS arm64，普通 Node 子进程执行）
+
+- `npm ci` 后补丁重放通过；`npm run typecheck` 通过。
+- multitask 检查全部实跑通过：guardrails、claims（3 项）、hardening（7 场景）、
+  mount、researcher、claim-enforcement、orchestrator-mode、round-driver、
+  command（含 busy-turn 公共缝、attachment 公共缝与阶段 4 持久顺序断言）。
+  task-card 检查除既有失败外全部通过：第二个键控卡片到达终态 `failed` 的
+  等待在 `88f89f0` 收紧断言（`failed === true && phase === 'failed'`）后即已
+  失败，非 0.2.1 回归；本次重跑其余分段（键控卡片、chip rail、researching
+  子代理、claim badge、narrow 卡）均通过。
+- 完整 `npm test`：2511 项中 2509 项通过；既有环境性失败 2 项
+  （`test/electron-node-loader.test.ts`、`test/ppt-windows-font-layout.test.mjs`），
+  与升级前 0.1.3 kit 基线（`/tmp/kit013`）失败一致，非本次引入。
+- `git diff --check` 通过。未做 UI/Electron 人工验收，未验证 Windows 与
+  安装包。
+
+### 一次性环境事件（非回归）
+
+- 一次 task-card 重跑因 `office:prepare` 清理旧 `.build/office-runtime` 时
+  `rmdir` 撞上仍在收尾的上一个 dev office worker（ENOTEMPTY）而启动失败；
+  确认无进程持有该目录后重跑通过。该目录为 git 忽略的构建产物。

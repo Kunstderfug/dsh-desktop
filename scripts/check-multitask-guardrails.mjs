@@ -10,7 +10,7 @@
 // scripted, matching the frozen `multitask_guardrails_gate` seam. The script
 // asserts full history — structured third-writer refusal, later admission,
 // queue uniqueness, the shared wake bound, parent-held path omission, and
-// the actual researcher `toolFilter` — not a helper call or a final-state
+// the actual researcher writer denial — not a helper call or a final-state
 // snapshot.
 //
 // Exit 0 only when every observation succeeded.
@@ -24,11 +24,12 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import Commands from '@deepseek-ai/dsh-commands'
 import { LlmAdapter, LlmRuntime, ToolCallId } from '@deepseek-ai/dsh-llm'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { workingDirectoryStub } from './multitask-fixture-support.mjs'
 import * as subagentSpawnInProcess from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import * as toolSubagent from '@deepseek-ai/dsh-tool-subagent'
@@ -289,6 +290,8 @@ async function compose(options = {}) {
   push(() => adapter.dispose())
   const loop = await ctx.plugin(AgentLoop)
   push(() => loop.dispose())
+  const workingDirectory = await ctx.plugin(workingDirectoryStub, home)
+  push(() => workingDirectory.dispose())
   const subagents = await ctx.plugin(SubagentRuntime)
   push(() => subagents.dispose())
   const spawn = await ctx.plugin(subagentSpawnInProcess)
@@ -375,12 +378,22 @@ async function assertRapidSettleCap() {
     await waitFor(() => app.ctx.agents.get(SessionId(String(researching.childId))) !== undefined, 'live researcher')
     const researcher = app.ctx.agents.get(SessionId(String(researching.childId)))
     const descriptor = researcher.session.snapshotEvents().find((event) => event.type === 'subagent/descriptor')
-    if (descriptor?.data?.toolFilter?.deny == null) fail('researcher spawn did not record toolFilter')
-    const deny = descriptor.data.toolFilter.deny
+    if (descriptor?.data?.label !== RESEARCHER_LABEL) fail('researcher spawn did not record the researcher label')
+    // 0.2.1 dropped the per-child toolFilter: the guard denies writer calls
+    // instead, so the tools stay visible and every call must be refused.
     for (const name of DENIED_TOOLS) {
-      if (!deny.includes(name)) fail(`researcher toolFilter is missing ${name}: ${JSON.stringify(deny)}`)
+      const result = await app.ctx.tools.execute({
+        callId: `researcher-${name}`,
+        name,
+        arguments: name === 'str_replace_editor'
+          ? { command: 'str_replace', path: 'researcher-denied.txt', old_str: 'a', new_str: 'b' }
+          : { file_path: 'researcher-denied.txt', content: 'nope' },
+        agent: researcher,
+        signal: new AbortController().signal
+      })
+      if (result.isError !== true) fail(`researcher ${name} call was not denied`)
+      if (!JSON.stringify(result).includes('researcher is read-only')) fail(`researcher ${name} denial text is not the guard reason`)
     }
-    if (app.ctx.tools.get('write', researcher) !== undefined) fail('researcher write tool leaked')
 
     app.ctx.get('multitask.claims')?.recordTouched?.(app.agent.session, PARENT_HELD)
     await runCommand(app.ctx, app.agent, '/multitask second objective')
@@ -468,32 +481,30 @@ async function assertSharedBound() {
     await waitFor(() => admittedHandoffs(app.agent).length >= 1, 'command handoff admitted')
     await app.agent.whenIdle()
     for (const label of ['settle-2', 'settle-3']) {
-      await app.ctx.subagents.startContinuable({
+      await app.ctx.subagents.startActivation({
         provider: 'spawn',
         label,
         request: {
           prompt: [{ type: 'text', text: `do not modify files\nRecommended claim set\nstructured research report ${label}` }],
-          parent: app.agent,
-          persona: RESEARCHER_LABEL,
-          toolFilter: { deny: [...DENIED_TOOLS] }
+          parent: app.agent
         },
-        signal: new AbortController().signal
+        signal: new AbortController().signal,
+        delivery: 'parent'
       })
     }
     await app.agent.whenIdle()
     const afterSettlements = admittedHandoffs(app.agent).length
     if (afterSettlements > 2) fail(`settlement wakes exceeded the shared bound: ${afterSettlements}`)
     if (afterSettlements !== 2) fail(`expected 2 automatic rounds, got ${afterSettlements}`)
-    await app.ctx.subagents.startContinuable({
+    await app.ctx.subagents.startActivation({
       provider: 'spawn',
       label: 'settle-over-bound',
       request: {
         prompt: [{ type: 'text', text: 'do not modify files\nRecommended claim set\nstructured research report over bound' }],
-        parent: app.agent,
-        persona: RESEARCHER_LABEL,
-        toolFilter: { deny: [...DENIED_TOOLS] }
+        parent: app.agent
       },
-      signal: new AbortController().signal
+      signal: new AbortController().signal,
+      delivery: 'parent'
     })
     await app.agent.whenIdle()
     if (admittedHandoffs(app.agent).length !== afterSettlements) {

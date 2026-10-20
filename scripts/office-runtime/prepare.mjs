@@ -80,6 +80,23 @@ async function stripUnusedPythonPayload(dependencies, sitePackages) {
   }
 }
 
+export async function removeRuntimePayload(output) {
+  // A dev app or check teardown can leave an office worker finishing writes
+  // (for example __pycache__ inside the bundled python/lib) while this removal
+  // walks the tree; one late entry makes fs.rm fail with ENOTEMPTY and aborts
+  // the boot. Retry briefly so the removal outlives the dying writer instead
+  // of failing `npm run dev` / the live gates on a transient race.
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await rm(output, { recursive: true, force: true })
+      return
+    } catch (error) {
+      if (error?.code !== 'ENOTEMPTY' || attempt >= 5) throw error
+      await new Promise((resolveSleep) => setTimeout(resolveSleep, 250 * attempt))
+    }
+  }
+}
+
 /** Always assemble this build's payload. Keep only verified downloads as cache. */
 export async function prepareOfficeRuntime({ target = officeTarget(), output = join(project, '.build/office-runtime'), cache = join(project, '.build/office-downloads') } = {}) {
   const artifact = lock.targets[target]
@@ -87,7 +104,7 @@ export async function prepareOfficeRuntime({ target = officeTarget(), output = j
   const { version } = JSON.parse(await readFile(join(project, 'package.json'), 'utf8'))
   await mkdir(dirname(output), { recursive: true })
   // Do not leave last build's payload available after a failed preparation.
-  await rm(output, { recursive: true, force: true })
+  await removeRuntimePayload(output)
   const staging = await mkdtemp(join(dirname(output), '.office-runtime-'))
   try {
     const runtime = join(staging, 'primary-runtime')

@@ -20,11 +20,12 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import Commands from '@deepseek-ai/dsh-commands'
 import { createUserMessage, LlmAdapter, LlmRuntime, ToolCallId } from '@deepseek-ai/dsh-llm'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { workingDirectoryStub } from './multitask-fixture-support.mjs'
 import * as subagentSpawnInProcess from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
@@ -235,6 +236,8 @@ async function compose(options = {}) {
 
   const loop = await ctx.plugin(AgentLoop)
   push(() => loop.dispose())
+  const workingDirectory = await ctx.plugin(workingDirectoryStub, home)
+  push(() => workingDirectory.dispose())
   const subagents = await ctx.plugin(SubagentRuntime)
   push(() => subagents.dispose())
   const spawn = await ctx.plugin(subagentSpawnInProcess)
@@ -337,15 +340,14 @@ async function assertLaunchAndDenial() {
 
     await waitFor(() => app.ctx.agents.get(SessionId(researching.childId)) !== undefined, 'live researcher')
     const child = app.ctx.agents.get(SessionId(researching.childId))
-    if (app.ctx.tools.get('write', child) !== undefined) fail('write remains visible on the researcher')
+    // 0.2.1 dropped the per-child toolFilter: writer tools stay visible and
+    // the host guard refuses each call, so the scripted mutation must fail
+    // with the guard reason rather than an unknown-tool error.
     const descriptor = child.session.snapshotEvents().find((event) => event.type === 'subagent/descriptor')
     if (descriptor === undefined) fail('child has no durable descriptor')
-    const deny = descriptor.data.toolFilter?.deny ?? []
-    if (DENIED_TOOLS.some((name) => !deny.includes(name))) {
-      fail(`child toolFilter deny is ${JSON.stringify(deny)}`)
-    }
-    if (!String(descriptor.data.persona ?? '').toLowerCase().includes('researcher')) {
-      fail('spawn request lacks a researcher persona')
+    if (descriptor.data.label !== RESEARCHER_LABEL) fail(`child descriptor label is ${JSON.stringify(descriptor.data.label)}`)
+    if (!JSON.stringify(child.session.snapshotEvents()).includes('You are the multitask researcher.')) {
+      fail('researcher persona is missing from the child prompt')
     }
     researcherHold.open()
     await waitFor(() =>
@@ -353,8 +355,8 @@ async function assertLaunchAndDenial() {
     'denied mutation result')
     const toolResult = child.session.snapshotEvents().find((event) => event.type === 'tool/result')
     const denialText = JSON.stringify(toolResult.data)
-    if (!denialText.includes('UNKNOWN_TOOL') || !/unknown tool \\?"write\\?"/i.test(denialText) || !denialText.includes('"isError":true')) {
-      fail(`attempted mutation was not denied: ${denialText.slice(0, 300)}`)
+    if (!denialText.includes('researcher is read-only') || !denialText.includes('"isError":true')) {
+      fail(`attempted mutation was not denied by the guard: ${denialText.slice(0, 300)}`)
     }
     if (denialText.includes('do not modify files')) {
       fail('denial depends on research-brief text')
@@ -362,9 +364,9 @@ async function assertLaunchAndDenial() {
     parentHold.open()
     await waitFor(() => taskEvents(app.agent).some((event) => event.phase === 'researched'), 'completed → researched')
     if (app.writes.length !== 0 || await fileExists(app.probePath)) {
-      fail('probe file was written despite the child toolFilter')
+      fail('probe file was written despite the read-only guard')
     }
-    log('check-multitask-researcher: PASS child toolFilter denial (probe absent, deny not prompt-only)')
+    log('check-multitask-researcher: PASS read-only guard denial (probe absent, deny not prompt-only)')
 
     await app.ctx.subagents.sendMessage(app.agent, SessionId(researching.childId), [{
       type: 'text',

@@ -28,7 +28,7 @@ import {
   LlmRuntime,
   type StreamChunk
 } from '@deepseek-ai/dsh-llm'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -38,6 +38,7 @@ import * as subagentSpawnInProcess from '@deepseek-ai/dsh-subagent-spawn-in-proc
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
 import * as multitask from '../packages/dsh-multitask/index.js'
+import { StubWorkingDirectory } from './helpers/working-directory-stub'
 
 const DENIED_TOOLS = ['write', 'edit', 'str_replace_editor'] as const
 
@@ -163,6 +164,9 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
 
   const loop = await ctx.plugin(AgentLoop)
   pushCore(() => loop.dispose())
+  // 0.2.1 SubagentRuntime injects workingDirectory; the stub keeps this fixture focused.
+  const workingDirectory = await ctx.plugin(StubWorkingDirectory, home)
+  pushCore(() => workingDirectory.dispose())
   const subagents = await ctx.plugin(SubagentRuntime)
   pushCore(() => (subagents as { dispose(): Promise<void> }).dispose())
   const spawn = await ctx.plugin(subagentSpawnInProcess as unknown as Parameters<Context['plugin']>[0])
@@ -440,16 +444,15 @@ describe('multitask_round_driver_gate settlement wake bound', () => {
     expect(afterCommand).toBeGreaterThanOrEqual(1)
 
     for (const label of ['settle-2', 'settle-3']) {
-      await f.ctx.subagents.startContinuable({
+      await f.ctx.subagents.startActivation({
         provider: 'spawn',
         label,
         request: {
           prompt: [{ type: 'text', text: `do not modify files\nRecommended claim set\nstructured research report ${label}` }],
-          parent: agent,
-          persona: RESEARCHER_LABEL,
-          toolFilter: { deny: ['write', 'edit', 'str_replace_editor'] }
+          parent: agent
         },
-        signal: new AbortController().signal
+        signal: new AbortController().signal,
+        delivery: 'parent'
       })
       await waitFor(() =>
         agent.session.deriveMessages().some(message =>
@@ -467,16 +470,15 @@ describe('multitask_round_driver_gate settlement wake bound', () => {
     expect(automaticAfterSettlements).toBe(2)
 
     const extraBeforeReset = automaticAfterSettlements
-    await f.ctx.subagents.startContinuable({
+    await f.ctx.subagents.startActivation({
       provider: 'spawn',
       label: 'settle-over-bound',
       request: {
         prompt: [{ type: 'text', text: 'do not modify files\nRecommended claim set\nstructured research report over bound' }],
-        parent: agent,
-        persona: RESEARCHER_LABEL,
-        toolFilter: { deny: ['write', 'edit', 'str_replace_editor'] }
+        parent: agent
       },
-      signal: new AbortController().signal
+      signal: new AbortController().signal,
+      delivery: 'parent'
     })
     await agent.whenIdle()
     expect(admittedHandoffs(agent).length, 'a further settlement must not exceed the bound').toBe(extraBeforeReset)
@@ -487,16 +489,15 @@ describe('multitask_round_driver_gate settlement wake bound', () => {
     }))
     await agent.whenIdle()
 
-    await f.ctx.subagents.startContinuable({
+    await f.ctx.subagents.startActivation({
       provider: 'spawn',
       label: 'settle-after-reset',
       request: {
         prompt: [{ type: 'text', text: 'do not modify files\nRecommended claim set\nstructured research report after reset' }],
-        parent: agent,
-        persona: RESEARCHER_LABEL,
-        toolFilter: { deny: ['write', 'edit', 'str_replace_editor'] }
+        parent: agent
       },
-      signal: new AbortController().signal
+      signal: new AbortController().signal,
+      delivery: 'parent'
     })
     await waitFor(() => admittedHandoffs(agent).length > extraBeforeReset, 'user input resets the wake counter')
     await agent.whenIdle()
@@ -526,16 +527,15 @@ describe('multitask_round_driver_gate settlement wake bound', () => {
     })
 
     const beforeTerminal = admittedHandoffs(agent).length
-    await f.ctx.subagents.startContinuable({
+    await f.ctx.subagents.startActivation({
       provider: 'spawn',
       label: 'settle-after-done',
       request: {
         prompt: [{ type: 'text', text: 'do not modify files\nRecommended claim set\nstructured research report after done' }],
-        parent: agent,
-        persona: RESEARCHER_LABEL,
-        toolFilter: { deny: ['write', 'edit', 'str_replace_editor'] }
+        parent: agent
       },
-      signal: new AbortController().signal
+      signal: new AbortController().signal,
+      delivery: 'parent'
     })
     await agent.whenIdle()
     expect(admittedHandoffs(agent).length, 'a terminal task must not consume a wake').toBe(beforeTerminal)
@@ -567,16 +567,15 @@ describe('multitask_round_driver_gate settlement wake bound', () => {
     const afterMaxTokens = admittedHandoffs(agent).length
     expect(afterMaxTokens).toBe(1)
 
-    await f.ctx.subagents.startContinuable({
+    await f.ctx.subagents.startActivation({
       provider: 'spawn',
       label: 'after-max-tokens',
       request: {
         prompt: [{ type: 'text', text: 'do not modify files\nRecommended claim set\nstructured research report after max-tokens' }],
-        parent: agent,
-        persona: RESEARCHER_LABEL,
-        toolFilter: { deny: ['write', 'edit', 'str_replace_editor'] }
+        parent: agent
       },
-      signal: new AbortController().signal
+      signal: new AbortController().signal,
+      delivery: 'parent'
     })
     await agent.whenIdle()
     expect(admittedHandoffs(agent).length, 'max-tokens must disarm later settlement wakes').toBe(afterMaxTokens)

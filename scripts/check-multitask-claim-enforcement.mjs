@@ -31,11 +31,12 @@ import SandboxedFileSystem from '@deepseek-ai/dsh-fs-sandbox'
 import { LlmAdapter, LlmRuntime, ToolCallId } from '@deepseek-ai/dsh-llm'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import * as shellEnv from '@deepseek-ai/dsh-shell-env'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { workingDirectoryStub } from './multitask-fixture-support.mjs'
 import * as subagentSpawnInProcess from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -297,6 +298,8 @@ async function compose(options = {}) {
   push(() => mounted.dispose())
   const observed = await ctx.plugin(observationPolicy)
   push(() => observed.dispose())
+  const workingDirectory = await ctx.plugin(workingDirectoryStub, home)
+  push(() => workingDirectory.dispose())
   const subagents = await ctx.plugin(SubagentRuntime)
   push(() => subagents.dispose())
   const spawn = await ctx.plugin(subagentSpawnInProcess)
@@ -345,23 +348,25 @@ async function launchTwoHeldChildren(app, hold, prompts = {
   })
   if (busy.isError) fail(`busy-parent write failed: ${busy.error?.message}`)
   await runCommand(app.ctx, app.agent, '/multitask implement shared file B')
-  const startA = await app.ctx.subagents.startContinuable({
+  const startA = await app.ctx.subagents.startActivation({
     provider: 'spawn',
     label: prompts.labels[0],
     request: {
       prompt: [{ type: 'text', text: prompts.a }],
       parent: app.agent
     },
-    signal: new AbortController().signal
+    signal: new AbortController().signal,
+    delivery: 'parent'
   })
-  const startB = await app.ctx.subagents.startContinuable({
+  const startB = await app.ctx.subagents.startActivation({
     provider: 'spawn',
     label: prompts.labels[1],
     request: {
       prompt: [{ type: 'text', text: prompts.b }],
       parent: app.agent
     },
-    signal: new AbortController().signal
+    signal: new AbortController().signal,
+    delivery: 'parent'
   })
   const childIds = [String(startA.childId), String(startB.childId)]
   await waitFor(
@@ -422,7 +427,7 @@ async function runAbortScenario() {
       fail(`abort denial did not identify holder: ${blocked.error?.message}`)
     }
 
-    await app.ctx.subagents.drainContinuableChildren(app.agent, [SessionId(pair.childIds[0])])
+    await app.ctx.subagents.drainChildren(app.agent, [SessionId(pair.childIds[0])])
     await waitFor(() => ends.get(pair.childIds[0]) === 'aborted', 'holder settled as aborted')
     await waitFor(
       () => !liveClaimTable(app.agent).some((claim) => claim.path === 'src/aborted.ts'),

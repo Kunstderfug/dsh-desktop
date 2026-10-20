@@ -34,7 +34,7 @@ import {
   ToolCallId
 } from '@deepseek-ai/dsh-llm'
 import SandboxPolicyService, { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -46,6 +46,7 @@ import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
 import ApprovalService from '@deepseek-ai/dsh-user-approval'
 import * as multitask from '../packages/dsh-multitask/index.js'
 import * as researcher from '../packages/dsh-multitask/researcher.js'
+import { StubWorkingDirectory } from './helpers/working-directory-stub'
 
 const DENIED_TOOLS = ['write', 'edit', 'str_replace_editor'] as const
 const RESEARCHER_LABEL = 'researcher'
@@ -206,6 +207,9 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
   push('adapter', () => adapter.dispose())
   const loop = await ctx.plugin(AgentLoop)
   push('loop', () => loop.dispose())
+  // 0.2.1 SubagentRuntime injects workingDirectory; the stub keeps this fixture focused.
+  const workingDirectory = await ctx.plugin(StubWorkingDirectory, home)
+  push('working-directory', () => workingDirectory.dispose())
   const subagents = await ctx.plugin(SubagentRuntime)
   push('subagents', () => (subagents as { dispose(): Promise<void> }).dispose())
   const spawn = await ctx.plugin(subagentSpawnInProcess as unknown as Parameters<Context['plugin']>[0])
@@ -631,31 +635,29 @@ describe('multitask_hardening_gate abuse and cancel', () => {
     await waitFor(() => admittedHandoffs(f.agent).length >= 1, 'command handoff admitted')
     await f.agent.whenIdle()
     for (const label of ['settle-2', 'settle-3']) {
-      await f.ctx.subagents.startContinuable({
+      await f.ctx.subagents.startActivation({
         provider: 'spawn',
         label,
         request: {
           prompt: [{ type: 'text', text: `do not modify files\nRecommended claim set\nstructured research report ${label}` }],
-          parent: f.agent,
-          persona: RESEARCHER_LABEL,
-          toolFilter: { deny: [...DENIED_TOOLS] }
+          parent: f.agent
         },
-        signal: new AbortController().signal
+        signal: new AbortController().signal,
+        delivery: 'parent'
       })
     }
     await f.agent.whenIdle()
     const afterSettlements = admittedHandoffs(f.agent).length
     expect(afterSettlements).toBe(2)
-    await f.ctx.subagents.startContinuable({
+    await f.ctx.subagents.startActivation({
       provider: 'spawn',
       label: 'settle-over-bound',
       request: {
         prompt: [{ type: 'text', text: 'do not modify files\nRecommended claim set\nstructured research report over bound' }],
-        parent: f.agent,
-        persona: RESEARCHER_LABEL,
-        toolFilter: { deny: [...DENIED_TOOLS] }
+        parent: f.agent
       },
-      signal: new AbortController().signal
+      signal: new AbortController().signal,
+      delivery: 'parent'
     })
     await f.agent.whenIdle()
     expect(admittedHandoffs(f.agent).length).toBe(afterSettlements)

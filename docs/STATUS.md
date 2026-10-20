@@ -1,3 +1,11 @@
+## Harness 0.2.1-rc.2 合并后兼容收敛 — 2026-10-20
+
+- 基线：分支 `feat/harness-0.2.1-rc.2`（fork 升级提交 `f85f342` 经 `a086088` 合入，补丁再生成 `e78aec2`，30 个 Harness 补丁全部 rc.2）。
+- 关键修复：`dsh-multitask/guardrails.js` 包装层叠加。0.2.1 cordis 的 `ctx.get(name)` 每次返回新 callable proxy，原 WeakSet 去重永不命中，每次 `agent/created` 都在 `startActivation`/`tools.execute` 上再叠一层；真实运行累积 109 层，一次成功激活触发 109 次回调并在 5 ms 内写入 109 条重复 `writing` 阶段事件。改为安装函数上的 Symbol 标记去重（属性写入持久到服务实例），隔离探针 109 次重复 `ensureWrapped` 后单次激活仅回调 1 次。
+- 其余收敛：claims 重启恢复对 0.2.1 fiber 未激活时 `ctx.get` 返回 `undefined` 的瞬时崩溃改为带注释的可忽略捕获；claims/hardening/mount 检查分别同步 `listDescendants`、core push 参数次序、claim 层占据契约（后者自上游 #11 起既有，测试未放宽）。
+- 验证：`npm ci` 补丁重放、`typecheck`、multitask 全部检查（guardrails、claims 3 项、hardening 7 场景、mount、researcher、claim-enforcement、orchestrator-mode、round-driver、command）实跑通过；task-card 检查除既有失败（`88f89f0` 收紧的第二卡片终态 `failed` 等待，非 0.2.1 回归）外通过。完整 `npm test` 2511 项中 2509 项通过，2 项失败为既有环境性失败（`electron-node-loader`、`ppt-windows-font-layout`，与 0.1.3 kit 基线一致）；`git diff --check` 通过。另记录 0.2.1 会话持久化契约：`session.v4.jsonl.zstd` 格式与激进缓冲（仅显式 `ctx.sessions.flush()` 路径与 teardown 强制落盘，运行中读取不再保证可见），command 检查已按此重排持久断言。UI/Electron 人工验收、Windows 与安装包未验证。详见 [升级记录](harness-0.2.1-rc.2-upgrade.md) 合并后收敛一节。
+- 附带排查：ppt-windows-font-layout 在 kit 0.1.3 与 0.1.5 下同样失败（`/tmp/kit013` 对照），为环境性既有问题，测试未放宽。
+
 ## Windows 导入苹方 PPT 的字体与字重解析 — 2026-10-15
 
 - 基线：核实远端 `V0.12.0@8ade5b7cc3d391fe881dd2af64a8648e771653f5`；工作树 `codex/windows-ppt-font-layout`，Harness `0.2.0-rc.2`、Kit `0.1.3`、Electron `43.0.0`。

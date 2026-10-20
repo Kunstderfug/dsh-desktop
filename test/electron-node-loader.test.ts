@@ -40,7 +40,12 @@ describe('Electron Node mode Harness loader probe', () => {
     `)
     try {
       const result = probeElectronNodeLoader({ executable: process.execPath, anchor })
-      expect(result).toMatchObject({ ok: true, runtime: { electron: null, node: process.versions.node } })
+      // `electron` is null under a plain-Node vitest parent, but this suite may
+      // itself run inside an Electron-as-Node agent harness, whose probe child
+      // reports the parent runtime's Electron version. Only the Node version is
+      // pinned here; the fingerprint gate is what the probe exists for.
+      expect(result).toMatchObject({ ok: true, runtime: { node: process.versions.node } })
+      if (result.ok) expect(result.runtime.electron).toMatch(/^(\d+\.\d+\.\d+|null)$/u)
       const requested = await readFile(path.join(root, 'node_modules', 'node-addon-require-builtin', 'requested.txt'), 'utf8')
       expect(requested.trim().split('\n')).toEqual([...HARNESS_INTERNAL_MODULES])
     } finally {

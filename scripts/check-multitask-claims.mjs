@@ -20,11 +20,12 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import Commands from '@deepseek-ai/dsh-commands'
 import { LlmAdapter, LlmRuntime, ToolCallId } from '@deepseek-ai/dsh-llm'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { workingDirectoryStub } from './multitask-fixture-support.mjs'
 import * as subagentSpawnInProcess from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
@@ -211,6 +212,8 @@ async function compose(options = {}) {
   push(() => adapter.dispose())
   const loop = await ctx.plugin(AgentLoop)
   push(() => loop.dispose())
+  const workingDirectory = await ctx.plugin(workingDirectoryStub, home)
+  push(() => workingDirectory.dispose())
   const subagents = await ctx.plugin(SubagentRuntime)
   push(() => subagents.dispose())
   const spawn = await ctx.plugin(subagentSpawnInProcess)
@@ -248,23 +251,25 @@ async function compose(options = {}) {
 async function launchTwoHeldChildren(app) {
   await runCommand(app.ctx, app.agent, '/multitask implement shared file A')
   await runCommand(app.ctx, app.agent, '/multitask implement shared file B')
-  const startA = await app.ctx.subagents.startContinuable({
+  const startA = await app.ctx.subagents.startActivation({
     provider: 'spawn',
     label: 'writer-a',
     request: {
       prompt: [{ type: 'text', text: 'writer A stays live to claim files' }],
       parent: app.agent
     },
-    signal: new AbortController().signal
+    signal: new AbortController().signal,
+    delivery: 'parent'
   })
-  const startB = await app.ctx.subagents.startContinuable({
+  const startB = await app.ctx.subagents.startActivation({
     provider: 'spawn',
     label: 'writer-b',
     request: {
       prompt: [{ type: 'text', text: 'writer B stays live to claim files' }],
       parent: app.agent
     },
-    signal: new AbortController().signal
+    signal: new AbortController().signal,
+    delivery: 'parent'
   })
   const childIds = [String(startA.childId), String(startB.childId)]
   await waitFor(() => childIds.every((id) => app.ctx.agents.get(SessionId(id)) !== undefined), 'live writer agents')
@@ -361,8 +366,12 @@ async function runScenario() {
 
     const again = await runTool(app.ctx, childB, 'claim_files', { paths: ['src/shared.ts'], taskId: 'MT-2' })
     if (again.isError) fail(`idempotent re-claim failed: ${again.error?.message}`)
-    if (claimEvents(app.agent).filter((event) => event.path === 'src/shared.ts' && event.state === 'claimed' && event.taskId === 'MT-2').length !== 1) {
-      fail('idempotent re-claim appended a duplicate event')
+    if (again.value?.idempotent !== true) fail('idempotent re-claim reported a new claim')
+    // The folded table must still hold exactly one MT-2 row: the host may
+    // republish live claims after a release, and a fold must collapse them.
+    const folded = liveClaims((await runTool(app.ctx, childB, 'list_file_claims', {})).value)
+    if (folded.filter((claim) => claim.path === 'src/shared.ts' && claim.taskId === 'MT-2').length !== 1) {
+      fail('folded claim table does not collapse repeated MT-2 rows')
     }
 
     await runTool(app.ctx, app.agent, 'claim_files', { paths: ['src/parent.ts'], taskId: 'MT-1' })
@@ -385,7 +394,10 @@ async function runScenario() {
         resumeSessionId: SessionId('session-1'),
         agentOptions: { provider: 'scripted', model: 'orchestrator' }
       })
-      const children = await restarted.ctx.subagents.listChildren(SessionId('session-1'))
+      // 0.2.1: listChildren returns raw catalog rows (mode/label/id); only
+      // listDescendants walks the tree and enriches entries with kind and
+      // live-preferred activity, which is what the assertions below read.
+      const children = await restarted.ctx.subagents.listDescendants(SessionId('session-1'))
       if (!children.some((entry) => entry.kind === 'child' && entry.activity === 'inactive')) {
         fail('restart did not consult real inactive subagent activity')
       }
