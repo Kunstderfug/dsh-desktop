@@ -63,7 +63,7 @@ describe('linked Profile plugin host dependency fallback', () => {
   // Reproduces the shape seen in production crash reports: a host package in
   // the shared Profile tree is older than the subpath its importer needs, so
   // resolution fails with ERR_PACKAGE_PATH_NOT_EXPORTED rather than not-found.
-  it('retries a stale host peer whose subpath the installation does export', async () => {
+  it('preserves a local exports boundary instead of mixing it with a host subpath', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-host-module-subpath-'))
     try {
       const host = join(root, 'host')
@@ -108,10 +108,9 @@ describe('linked Profile plugin host dependency fallback', () => {
         join(host, 'entry.mjs')
       ], { encoding: 'utf8' })
 
-      expect(result.status, result.stderr).toBe(0)
-      // Only the missing subpath comes from the host; the bare specifier keeps
-      // resolving to the copy the plugin's own tree provides.
-      expect(result.stdout).toContain('fixture:{"control":"host-control","source":"stale"}')
+      expect(result.status).not.toBe(0)
+      expect(result.stderr).toContain('ERR_PACKAGE_PATH_NOT_EXPORTED')
+      expect(result.stdout).not.toContain('host-control')
     } finally {
       await rm(root, { recursive: true, force: true })
     }

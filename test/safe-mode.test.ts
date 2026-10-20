@@ -404,6 +404,31 @@ describe('Safe Mode', () => {
     }
   })
 
+  it('sanitizes invalid DeepSeek baseURL when inheriting model configuration into safe mode', async () => {
+    const dshHome = join(__dirname, '.temp-safe-mode-sanitize')
+    try {
+      const webProfileDir = join(dshHome, 'profiles', 'web')
+      const { mkdir } = await import('node:fs/promises')
+      await mkdir(webProfileDir, { recursive: true })
+      await writeFile(join(webProfileDir, 'cordis.patch.yml'), `- id: llm-deepseek
+  config:
+    baseURL: invalid-endpoint
+    maxTokens: 8000
+- id: agent-default-model
+  config:
+    provider: deepseek
+`)
+
+      const directory = await ensureSafeModeProfile(dshHome)
+      const safePatch = await readFile(join(directory, 'cordis.patch.yml'), 'utf8')
+      expect(safePatch).toContain('id: llm-deepseek')
+      expect(safePatch).toContain('maxTokens: 8000')
+      expect(safePatch).not.toContain('invalid-endpoint')
+    } finally {
+      await rm(dshHome, { recursive: true, force: true })
+    }
+  })
+
   it('creates a managed core-only profile and repairs later modifications', async () => {
     const dshHome = join(__dirname, '.temp-safe-mode-profile')
     try {

@@ -31,7 +31,7 @@ window.__ModuleLoader__.load({
       '工作台市场': 'Workbench Market', '制作属于你的工作台': 'Build your own workbench', '制作我的工作台': 'Build my workbench', '返回工作台市场': 'Back to Workbench Market',
       '工作台把专属界面、会话和资料组织在一起。可通过顶部快捷栏在会话与不同工作台之间切换。': 'Workbenches bring dedicated interfaces, sessions, and files together. Use the top switcher to move between sessions and workbenches.',
       '遵循规范开发、安装并验证，也可以准备材料提交到工作台市场。': 'Follow the guidelines to build, install, and test a workbench. You can also prepare a market submission.',
-      '有序组织专属界面、会话与资料': 'Organize your dedicated interfaces, conversations, and resources', '市场': 'Market', '全部类型': 'All types', '按推荐值': 'Recommended', '在此切换会话与不同工作台': 'Switch between conversations and workbenches here', '知道了': 'Got it', '停用': 'Disable', '启用': 'Enable', '已收藏': 'Favorited', '查看 GitHub': 'View GitHub', '查看详情': 'View details',
+      '有序组织专属界面、会话与资料': 'Organize your dedicated interfaces, conversations, and resources', '市场': 'Market', '全部类型': 'All types', '在此切换会话与不同工作台': 'Switch between conversations and workbenches here', '知道了': 'Got it', '停用': 'Disable', '启用': 'Enable', '已收藏': 'Favorited', '查看 GitHub': 'View GitHub', '查看详情': 'View details',
       '正在更新目录…': 'Updating catalog…', '正在首次读取市场目录…': 'Loading the market catalog for the first time…', '市场目录暂不可用': 'Market catalog unavailable', '请重试读取目录，或使用已安装的工作台。': 'Retry loading the catalog, or use your installed workbenches.',
       '刷新目录': 'Refresh catalog', '正在检查更新': 'Checking for updates', '检查更新': 'Check for updates', '正在检查…': 'Checking…',
       '确认更新': 'Confirm update', '本机': 'On device', '市场': 'Market', '查看市场版本': 'View market version', '当前工作台来自本地开发。更新将改用市场发布的代码，本地修改不会带入新版本。请先备份安装目录中的重要文件。': 'This workbench is locally developed. Updating will use the market release code; local changes will not carry over. Back up important files in the installation directory first.', '检测到当前安装内容已被修改。更新将改用市场发布的代码，请先备份需要保留的修改。': 'The installed content has been modified. Updating will use the market release code. Back up any changes you want to keep first.', '需要确认更新本机工作台代码。': 'Confirm updating the installed workbench code.', '工作台集合': 'Workbench collections', '我的收藏': 'Favorites', '已安装': 'Installed', '搜索名称、作者或分类': 'Search name, author, or category', '搜索工作台': 'Search workbenches', '按分类筛选': 'Filter by category',
@@ -1943,7 +1943,6 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
             h('a', { href: result.url, target: '_blank', rel: 'noopener noreferrer' }, tr('在 GitHub 查看')))))
     }
     function sortMarketEntries(entries, sortBy) {
-      if (sortBy === 'default') return entries
       const valueFor = (entry) => {
         if (sortBy === 'stars') return metricValue(entry.metrics?.githubStars?.value, entry.githubStars)
         if (sortBy === 'downloads') return metricValue(entry.metrics?.npmDownloads30d?.value, entry.metrics?.githubReleaseDownloads?.value, entry.installations, entry.installCount)
@@ -1975,7 +1974,7 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
       const [tab, setTab] = React.useState('market')
       const [search, setSearch] = React.useState('')
       const [category, setCategory] = React.useState('all')
-      const [sortBy, setSortBy] = React.useState('default')
+      const [sortBy, setSortBy] = React.useState('stars')
       const [detail, setDetail] = React.useState(null)
       const [removing, setRemoving] = React.useState(null)
       const [openPrompt, setOpenPrompt] = React.useState(null)
@@ -2057,7 +2056,6 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
             h('span', { className: 'dshWbRefreshHint' }, h(Button, { className: 'dshWbBtn dshWbRefresh', 'aria-describedby': 'dsh-workbench-refresh-tooltip', 'aria-label': checkingUpdates ? tr('正在检查更新') : tab === 'mine' ? tr('检查更新') : tr('刷新目录'), 'aria-busy': catalogRefreshing || checkingUpdates, disabled: catalogRefreshing || checkingUpdates, onClick: () => service.run(tab === 'mine' ? service.checkUpdates() : service.refreshCatalog()) }, h(MarketIcon, { name: 'refresh', size: 17 })), h('span', { id: 'dsh-workbench-refresh-tooltip', className: 'dshWbControlTooltip', role: 'tooltip' }, checkingUpdates ? tr('正在检查更新') : tab === 'mine' ? tr('检查更新') : tr('刷新目录'))),
             h('label', { className: 'dshWbSort' }, h('select', { 'aria-label': tr('按分类筛选'), value: category, onChange: (event) => setCategory(event.target.value) }, categories.map((value) => h('option', { key: value.id, value: value.id }, value.id === 'all' ? tr('全部类型') : value.name)))),
             h('label', { className: 'dshWbSort' }, h('select', { 'aria-label': tr('工作台排序方式'), value: sortBy, onChange: (event) => setSortBy(event.target.value) },
-              h('option', { value: 'default' }, tr('按推荐值')),
               h('option', { value: 'stars' }, tr('Star 数量')),
               h('option', { value: 'downloads' }, tr('下载量')),
               h('option', { value: 'updated' }, tr('更新时间')),

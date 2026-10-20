@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import time
 import urllib.request
 from pathlib import Path
@@ -66,17 +67,69 @@ def verify_download(url: str, expected_size: int) -> None:
             time.sleep(10)
 
 
-def build_notification(version: str, installers: list[tuple[str, Path]], repo_id: str, prefix: str, run_url: str) -> str:
+def git(*args: str) -> str:
+    return subprocess.check_output(["git", *args], text=True, encoding="utf-8").strip()
+
+
+def build_test_changes(repository_url: str) -> str:
+    if git("rev-parse", "--is-shallow-repository") == "true":
+        raise ValueError("Signed test changelog requires complete git history and tags")
+    head = git("rev-parse", "HEAD")
+    release_tag = re.compile(r"[vV]?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
+    tags = [tag for tag in git("tag", "--merged", head).splitlines() if release_tag.fullmatch(tag)]
+    # When dispatched on a tag itself, compare that release to the preceding tag.
+    earlier = [tag for tag in tags if git("rev-parse", f"refs/tags/{tag}^{{commit}}") != head]
+    previous = git("describe", "--tags", "--abbrev=0", *[f"--match={tag}" for tag in earlier], head) if earlier else ""
+    revision = f"{previous}..{head}" if previous else head
+    raw = git("log", "--no-merges", "--reverse", "--format=%s%x00%b%x00", revision)
+    sections: dict[str, list[str]] = {"功能": [], "修复": [], "性能与改进": [], "其他变更": []}
+    fields = raw.split("\0")
+
+    def markdown(text: str) -> str:
+        return re.sub(r"([\\`*\[\]<>_])", r"\\\1", text)
+
+    for index in range(0, len(fields) - 1, 2):
+        subject, body = fields[index].strip(), fields[index + 1].strip()
+        match = re.match(r"(feat|fix|perf|refactor|build|ci|docs|test|chore)(?:\(([^)]+)\))?!?:\s*(.+)", subject, re.DOTALL)
+        category = "其他变更"
+        title = subject
+        if match:
+            kind, scope, title = match.groups()
+            category = {"feat": "功能", "fix": "修复", "perf": "性能与改进", "refactor": "性能与改进"}.get(kind, category)
+            if scope:
+                title = f"{scope}: {title}"
+        item = f"- {markdown(title)}"
+        if body:
+            item += "\n" + "\n".join(f"  {markdown(line)}" for line in body.splitlines())
+        sections[category].append(item)
+    baseline = f"上一个 tag：`{previous}`" if previous else "无历史版本 tag，列出首次提测变更。"
+    parts = ["**本次提测变更**", baseline, f"构建提交：`{head[:12]}`", "以下列表与说明来自该范围的提交记录，供提测核对。"]
+    if previous:
+        parts.append(f"[完整代码比较]({repository_url}/compare/{quote(previous, safe='')}...{head})")
+    for title, items in sections.items():
+        if items:
+            parts.extend([f"**{title}**", "\n".join(items)])
+    if not any(sections.values()):
+        parts.append("该范围没有非合并提交。")
+    return "\n\n".join(parts)
+
+
+def build_notification(version: str, installers: list[tuple[str, Path]], repo_id: str, prefix: str, run_url: str, changes: str = "") -> str:
     links = "\n".join(f"- [{label}]({download_url(repo_id, prefix, file.name)})" for label, file in installers)
     checks = []
     if any(label.startswith("macOS") for label, _ in installers):
         checks.append("macOS 安装包已通过签名与公证检查。")
     if any(label.startswith("Windows") for label, _ in installers):
         checks.append("Windows 安装包已通过签名安装 smoke。")
+    if len(changes) > 9000:
+        changes = changes[:8500].rsplit("\n", 1)[0] + "\n\n变更较多，完整列表与说明请查看下方文件。"
+    change_link = download_url(repo_id, prefix, "test-changes.md")
+    details = f"\n\n{changes}\n\n[完整提测变更说明]({change_link})" if changes else ""
     return (
         f"**DSH Desktop {version} 测试打包完成**\n\n"
         "本次为签名测试安装包，用于安装和功能验收，请手动下载安装。\n"
         + "\n".join(checks)
+        + details
         + f"\n\n**下载地址**\n{links}\n\n[CI 构建详情]({run_url})"
     )
 
@@ -95,11 +148,15 @@ def main() -> None:
     if not token or not webhook:
         raise ValueError("ModelScope token and Feishu webhook are required for signed test builds")
     installers = installer_paths(args.directory, args.target)
+    repository_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+    changes = build_test_changes(repository_url)
+    changes_file = args.directory / "test-changes.md"
+    changes_file.write_text(f"# DSH Desktop {args.version} 提测说明\n\n{changes}\n", encoding="utf-8")
     # Import the SDK only for uploads; the notification and selection logic is independently testable.
     from modelscope.hub.api import HubApi
 
     api = HubApi()
-    for _, file in installers:
+    for _, file in [*installers, ("提测说明", changes_file)]:
         url = download_url(repo_id, prefix, file.name)
         api.upload_file(
             repo_id=repo_id,
@@ -111,7 +168,7 @@ def main() -> None:
         verify_download(url, file.stat().st_size)
         print(f"Verified signed test installer: {file.name}")
     run_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{args.run_id}"
-    notes = build_notification(args.version, installers, repo_id, prefix, run_url)
+    notes = build_notification(args.version, installers, repo_id, prefix, run_url, changes)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as stream:

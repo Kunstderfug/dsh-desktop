@@ -11,6 +11,7 @@ import { prepareHostDisabledPluginsPatch } from '../state/host-disabled-plugins'
 import { prepareHostPluginSourcesPatch } from '../state/host-plugin-sources'
 import { parsePluginStartupFailures, type PluginStartupFailure } from '../../shared/plugin-startup-failure'
 import { removeStaleWriterLocks } from './stale-writer-locks'
+import { inspectStartupConfiguration, validModelEndpoint } from '../state/startup-config-recovery'
 
 export interface HarnessRuntimeOptions {
   dshEntryPath: string
@@ -371,10 +372,21 @@ export function buildHarnessSpawnOptions(
   // exits silently. This is the same isolation that the Harness's own
   // subprocess layer is expected to apply; we apply it here so the desktop
   // shell never becomes collateral damage for a buggy child (issue #208).
+  const cleanedEnvironment: NodeJS.ProcessEnv = { ...parentEnvironment }
+  const rawDeepSeekKey = platform === 'win32'
+    ? Object.keys(cleanedEnvironment).find(k => k.toUpperCase() === 'DEEPSEEK_BASE_URL')
+    : 'DEEPSEEK_BASE_URL'
+  if (rawDeepSeekKey) {
+    const rawValue = cleanedEnvironment[rawDeepSeekKey]
+    if (rawValue !== undefined && !validModelEndpoint(rawValue, true)) {
+      delete cleanedEnvironment[rawDeepSeekKey]
+    }
+  }
+
   return {
     cwd: launchDirectory,
     env: {
-      ...parentEnvironment,
+      ...cleanedEnvironment,
       ...(platform !== 'darwin' && { ELECTRON_RUN_AS_NODE: '1' }),
       DSH_HOME: dshHome,
       NO_COLOR: '1',
@@ -555,6 +567,26 @@ export class HarnessRuntime {
       return
     }
     await mkdir(this.options.dshHome, { recursive: true })
+    const shellEnvironment = await prewarmShellEnvironment()
+    let configurationProblems
+    try {
+      configurationProblems = await inspectStartupConfiguration(this.options.dshHome, profile, shellEnvironment, launchDirectory)
+    } catch (error) {
+      this.writeLog(`[desktop] configuration inspection failed: ${error instanceof Error ? error.message : String(error)}`)
+      this.setState('failed', 'Startup configuration could not be inspected; check file access permissions.')
+      return
+    }
+    const blockingProblems = configurationProblems.filter(problem => problem.blocking !== false)
+    if (blockingProblems.length > 0) {
+      const detail = blockingProblems.map(problem => `${problem.kind}: ${problem.source} ${problem.path}`).join('\n')
+      this.writeLog(`[desktop] startup configuration requires recovery: ${detail}`)
+      this.setState('failed', `Startup configuration requires recovery:\n${detail}`)
+      return
+    }
+    if (configurationProblems.length > 0) {
+      const nonBlockingDetail = configurationProblems.map(problem => `${problem.kind}: ${problem.source} ${problem.path}`).join('\n')
+      this.writeLog(`[desktop] non-blocking configuration notice (editable in UI):\n${nonBlockingDetail}`)
+    }
     const patchPath = profile === SAFE_MODE_PROFILE
       ? sourcePatchPath
       : await prepareHostPluginSourcesPatch(this.options.dshHome, sourcePatchPath, this.options.dshEntryPath)
@@ -603,7 +635,6 @@ export class HarnessRuntime {
     this.writeLog(`[desktop] endpoint ${url}`)
     this.setState('starting', 'Starting DeepSeek Harness…')
 
-    const shellEnvironment = await prewarmShellEnvironment()
     let child: HarnessChildProcess
     try {
       child = this.options.launchProcess(

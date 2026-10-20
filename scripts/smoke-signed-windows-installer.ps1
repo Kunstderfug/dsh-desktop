@@ -78,6 +78,27 @@ function Get-HarnessLogPaths {
 
 function Assert-OfficeRuntime([string]$executable) {
   $resources = Join-Path (Split-Path $executable) 'resources'
+  $previousRunAsNode = $env:ELECTRON_RUN_AS_NODE
+  $stdoutFile = [System.IO.Path]::GetTempFileName()
+  $stderrFile = [System.IO.Path]::GetTempFileName()
+  try {
+    $env:ELECTRON_RUN_AS_NODE = '1'
+    $process = Start-Process -FilePath $executable -ArgumentList @(
+      (Join-Path $PSScriptRoot 'verify-packaged-harness.cjs'),
+      '--verify-runtime',
+      (Join-Path $resources 'app.asar'),
+      $resources,
+      $executable
+    ) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
+    if (Test-Path $stdoutFile) { Get-Content -LiteralPath $stdoutFile | ForEach-Object { Write-Host $_ } }
+    if (Test-Path $stderrFile) { Get-Content -LiteralPath $stderrFile | ForEach-Object { [Console]::Error.WriteLine($_) } }
+    if ($process.ExitCode -ne 0) {
+      throw "Installed Harness and native runtime validation failed with exit code $($process.ExitCode)."
+    }
+  } finally {
+    $env:ELECTRON_RUN_AS_NODE = $previousRunAsNode
+    Remove-Item -LiteralPath $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
+  }
   & node (Join-Path $PSScriptRoot 'verify-office-runtime.cjs') $resources $executable
   if ($LASTEXITCODE -ne 0) { throw 'Installed Office runtime validation failed.' }
 }

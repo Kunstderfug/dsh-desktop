@@ -2631,7 +2631,7 @@ describe('workbench market screenshot and metadata display', () => {
     await expect(service.open('o/new')).resolves.toBeUndefined()
   })
 
-  it('sorts market cards by visible stars, downloads, update time and name without changing the default order', async () => {
+  it('defaults market cards to descending stars and offers downloads, update time and name sorting', async () => {
     const { service } = await fixture()
     service.remoteCatalog = [
       listed({ id: 'o/zulu', name: 'Zulu', metrics: { githubStars: { value: 2 }, npmDownloads30d: { value: 8 } }, updatedAt: '2026-01-02T00:00:00Z' }),
@@ -2645,10 +2645,11 @@ describe('workbench market screenshot and metadata display', () => {
     const sort = (value) => {
       const select = ui.find(ui.render(), node => node.type === 'select' && node.props['aria-label'] === '工作台排序方式')[0]
       expect(select.props.value).toBeDefined()
-      expect(select.props.children.map(option => option.props.value)).toEqual(['default', 'stars', 'downloads', 'updated', 'name'])
+      expect(select.props.children.map(option => option.props.value)).toEqual(['stars', 'downloads', 'updated', 'name'])
       select.props.onChange({ target: { value } })
     }
-    expect(cards()).toEqual(['o/zulu', 'o/alpha', 'o/bravo', 'o/missing'])
+    expect(ui.find(ui.render(), node => node.type === 'select' && node.props['aria-label'] === '工作台排序方式')[0].props.value).toBe('stars')
+    expect(cards()).toEqual(['o/alpha', 'o/bravo', 'o/zulu', 'o/missing'])
     sort('stars')
     expect(cards()).toEqual(['o/alpha', 'o/bravo', 'o/zulu', 'o/missing'])
     sort('downloads')
@@ -2657,8 +2658,8 @@ describe('workbench market screenshot and metadata display', () => {
     expect(cards()).toEqual(['o/alpha', 'o/bravo', 'o/zulu', 'o/missing'])
     sort('name')
     expect(cards()).toEqual(['o/alpha', 'o/bravo', 'o/missing', 'o/zulu'])
-    sort('default')
-    expect(cards()).toEqual(['o/zulu', 'o/alpha', 'o/bravo', 'o/missing'])
+    sort('stars')
+    expect(cards()).toEqual(['o/alpha', 'o/bravo', 'o/zulu', 'o/missing'])
   })
 
   it('keeps sorting active while searching, filtering categories and switching collections', async () => {
@@ -2673,7 +2674,6 @@ describe('workbench market screenshot and metadata display', () => {
     const ui = interactiveMarket(service)
     const cards = () => ui.find(ui.render(), node => node.type === 'article').map(node => node.props.key)
     const node = predicate => ui.find(ui.render(), predicate)[0]
-    node(item => item.type === 'select' && item.props['aria-label'] === '工作台排序方式').props.onChange({ target: { value: 'stars' } })
     expect(cards()).toEqual(['o/c', 'o/b', 'o/a'])
     node(item => item.type === 'select' && item.props['aria-label'] === '按分类筛选').props.onChange({ target: { value: '效率' } })
     expect(cards()).toEqual(['o/c', 'o/a'])

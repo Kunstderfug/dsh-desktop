@@ -35,6 +35,8 @@ async function fixture(existingRoot) {
   };
   const host = {
     provide() {},
+    workingDirectory: { ensure: async () => workspace },
+    sandboxPolicy: { resolve: () => ({ mode: 'workspace-write', workspaceRoot: workspace }) },
     effect(run) { run(); return () => {}; },
     webServer: { register(route) { routes.set(route.path, route); return () => routes.delete(route.path); } },
     get(name) { if (name === 'connection') return connection; throw new Error(`Unexpected service: ${name}`); },
