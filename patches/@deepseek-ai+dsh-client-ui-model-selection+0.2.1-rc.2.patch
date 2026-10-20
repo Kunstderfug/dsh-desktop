@@ -1,8 +1,8 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js
-index 29c1b1c..17a0074 100644
+index c38bfbb..50f8669 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js
-@@ -166,6 +166,44 @@ window.__ModuleLoader__.load({
+@@ -800,6 +800,44 @@ window.__ModuleLoader__.load({
  		};
  		//#endregion
  		//#region lib/types/client/directory.js
@@ -47,7 +47,7 @@ index 29c1b1c..17a0074 100644
  		/** One session's shared directory controller; disposed with the session scope. */
  		var ModelDirectory = class {
  			sessions;
-@@ -188,6 +226,10 @@ window.__ModuleLoader__.load({
+@@ -822,6 +860,10 @@ window.__ModuleLoader__.load({
  			/** Latest selection operation wins; an older response never overwrites a newer one. */
  			generation = 0;
  			disposed = false;
@@ -58,7 +58,7 @@ index 29c1b1c..17a0074 100644
  			unsubscribeCatalog;
  			unsubscribeSelection;
  			/**
-@@ -300,6 +342,54 @@ window.__ModuleLoader__.load({
+@@ -934,6 +976,54 @@ window.__ModuleLoader__.load({
  				});
  				this.syncInputs();
  			}
@@ -113,7 +113,7 @@ index 29c1b1c..17a0074 100644
  			/** Scope teardown: late settlements lose write access to the store. */
  			dispose() {
  				this.disposed = true;
-@@ -330,10 +420,21 @@ window.__ModuleLoader__.load({
+@@ -964,10 +1054,21 @@ window.__ModuleLoader__.load({
  					});
  					return;
  				}
@@ -138,7 +138,7 @@ index 29c1b1c..17a0074 100644
  					...retainedEffort === void 0 ? {} : { retainedEffort },
  					routable,
  					groups: catalog.value.groups,
-@@ -1267,7 +1368,9 @@ window.__ModuleLoader__.load({
+@@ -1927,7 +2028,9 @@ window.__ModuleLoader__.load({
  		exports.ModelDirectory = ModelDirectory;
  		exports.ModelDirectoryResolver = ModelDirectoryResolver;
  		exports.apply = apply;

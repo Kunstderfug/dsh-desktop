@@ -1,8 +1,8 @@
 diff --git a/node_modules/@deepseek-ai/dsh-token-meter/lib/index.js b/node_modules/@deepseek-ai/dsh-token-meter/lib/index.js
-index 25a8246..a553c80 100644
+index 529e007..b66301c 100644
 --- a/node_modules/@deepseek-ai/dsh-token-meter/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-token-meter/lib/index.js
-@@ -444,6 +444,130 @@ const tokenUsageProjectionDefinition = {
+@@ -424,6 +424,130 @@ const tokenUsageProjectionDefinition = {
  		view: (state) => state.totals
  	}
  };
@@ -133,7 +133,7 @@ index 25a8246..a553c80 100644
  /**
  * Token-meter's context-occupancy projection unit.
  *
-@@ -611,6 +735,7 @@ var TokenMeter = class extends Service {
+@@ -692,6 +816,7 @@ var TokenMeter = class extends Service {
  		super(ctx, "tokenMeter");
  		validateConfigKeys(config);
  		ctx.sessionProjections.register(tokenUsageProjectionDefinition);
@@ -141,7 +141,7 @@ index 25a8246..a553c80 100644
  		ctx.sessionProjections.register(contextPressureProjectionDefinition);
  		ctx.sessionProjections.register(contextBreakdownProjectionDefinition);
  		ctx.on("session/event", (session) => {
-@@ -792,4 +917,4 @@ var TokenMeter = class extends Service {
+@@ -873,4 +998,4 @@ var TokenMeter = class extends Service {
  	}
  };
  //#endregion

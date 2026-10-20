@@ -1,8 +1,77 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js
+index 4bfdd13..bc75b92 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js
-@@ -17321,15 +17321,16 @@
- 			return conversation.activeTargets.size > 0 || !session.blank && !session.awaitingFirstTurn || session.running ? "active" : session.promptAttempted ? "engaging" : "blank";
+@@ -4494,6 +4494,25 @@ window.__ModuleLoader__.load({
+ 				return null;
+ 			}
+ 		}
++		/** localStorage prefix of the desktop draft mirror (one unsent draft per Session). */
++		const DRAFT_MIRROR_KEY = "dsh.draft";
++		/**
++		* Read the desktop draft mirror: a wipe-proof copy of one Session's unsent
++		* composer text. The Conversation store's own persistence is removed when
++		* the Session scope dies (renderer store-scope teardown), so the mirror
++		* keeps the draft recoverable across switches and restarts; the workspace
++		* sidebar reads the same keys for draft rows.
++		* @param sessionId - Session the mirror belongs to.
++		* @returns the mirrored draft, or "" when none is recorded.
++		*/
++		function readDraftMirror(sessionId) {
++			if (typeof localStorage === "undefined" || sessionId === void 0) return "";
++			try {
++				return localStorage.getItem(`${DRAFT_MIRROR_KEY}.${sessionId}`) ?? "";
++			} catch {
++				return "";
++			}
++		}
+ 		//#endregion
+ 		//#region ../../context/file-reference/lib/types/grammar.js
+ 		/**
+@@ -15799,6 +15818,26 @@ window.__ModuleLoader__.load({
+ 					}
+ 				});
+ 				this.shells.set(binding, shell);
++				/* Desktop draft persistence: mirror every draft change of this shell
++				* into a wipe-proof localStorage key (`dsh.draft.<sessionId>`). Unlike
++				* the Conversation store mirror (bounded to a mounted composer and
++				* cleared with the Session scope), this wraps publish() itself, so
++				* programmatic writes — the workspace draft hand-off, seeded restores —
++				* mirror too, and the draft survives scope teardown and restarts. */
++				const draftMirrorKey = `${DRAFT_MIRROR_KEY}.${binding}`;
++				let mirroredDraft = shell.snapshot.draft;
++				const shellPublish = shell.publish.bind(shell);
++				shell.publish = () => {
++					shellPublish();
++					const next = shell.snapshot.draft;
++					if (next === mirroredDraft) return;
++					mirroredDraft = next;
++					try {
++						if (typeof localStorage === "undefined") return;
++						if (next === "") localStorage.removeItem(draftMirrorKey);
++						else localStorage.setItem(draftMirrorKey, next);
++					} catch {}
++				};
+ 				actx.effect(() => {
+ 					const offs = [
+ 						actx.on("slash/input-begin-command", (req) => shell.beginCommand(req.claim, req.span) ? true : void 0),
+@@ -15822,7 +15861,14 @@ window.__ModuleLoader__.load({
+ 						};
+ 					}, "conversation.input: reference catalogs");
+ 				});
+-				shell.setDraft(readConversationDraft(binding.sessionId));
++				const persistedDraft = readConversationDraft(binding.sessionId);
++				/* Desktop patch: the Conversation store key is cleared with the Session
++				* scope, so an empty rehydrate falls back to the wipe-proof mirror. */
++				const mirrorFallback = persistedDraft.text === "" && persistedDraft.references.length === 0 ? readDraftMirror(binding.sessionId) : "";
++				shell.setDraft(mirrorFallback === "" ? persistedDraft : {
++					text: mirrorFallback,
++					references: []
++				});
+ 				return shell;
+ 			}
+ 			/**
+@@ -17322,13 +17368,14 @@ window.__ModuleLoader__.load({
  		}
  		//#endregion
  		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css.mjs
@@ -19,9 +88,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  			document.head.appendChild(tag);
  		}
  		var ConversationRoot_module_css_default = {
- 			"body": "wSkVaW_body",
-@@ -17350,8 +17351,9 @@
- 			"headerLeading": "wSkVaW_headerLeading",
+@@ -17351,6 +17398,7 @@ window.__ModuleLoader__.load({
  			"headerSessionless": "wSkVaW_headerSessionless",
  			"headerUtilities": "wSkVaW_headerUtilities",
  			"heroOptions": "wSkVaW_heroOptions",
@@ -29,9 +96,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  			"heroWorkspaceRow": "wSkVaW_heroWorkspaceRow",
  			"root": "wSkVaW_root",
  			"scrollBody": "wSkVaW_scrollBody",
- 			"tab": "wSkVaW_tab",
-@@ -17812,14 +17814,19 @@
- 					renderSlot("conversation.hero.agentPreset", {}),
+@@ -17813,12 +17861,17 @@ window.__ModuleLoader__.load({
  					sessionId === void 0 ? null : (0, react_jsx_runtime.jsx)("div", {
  						className: ConversationRoot_module_css_default.heroOptions,
  						children: renderSlot("conversation.hero.options", {})
@@ -49,9 +114,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  				...inert ? {
  					disabled: true,
  					placeholder: t("placeholder.workspace"),
- 					workspacePickerOpen: pickerOpen,
-@@ -17839,9 +17846,10 @@
- 						renderSlot
+@@ -17840,7 +17893,8 @@ window.__ModuleLoader__.load({
  					}),
  					hero && heroWorkspaceRow,
  					zone !== void 0 && renderSlot("conversation.input.dock", zone),
@@ -61,9 +124,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  				]
  			});
  			const composer = renderSlotChain("conversation.composer", {
- 				sessionId,
-@@ -17883,9 +17891,10 @@
- 		* @param props - main-slot inputs and the declared Conversation renderer.
+@@ -17884,7 +17938,8 @@ window.__ModuleLoader__.load({
  		* @returns the Conversation subtree.
  		*/
  		function ConversationPanel({ renderSlot }) {
@@ -73,9 +134,15 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  		}
  		//#endregion
  		//#region lib/types/client/skeleton/ConversationHeader.js
- 		/** Resident conversation navigation and Session-specific header content. */
-@@ -18699,15 +18708,18 @@
- 			};
+@@ -17900,6 +17955,7 @@ window.__ModuleLoader__.load({
+ 			const blank = session === void 0 || conversation === void 0 || session.blank && conversationPhase(session, conversation) === "blank";
+ 			return (0, react_jsx_runtime.jsxs)("header", {
+ 				className: clsx(ConversationRoot_module_css_default.header, blank && ConversationRoot_module_css_default.headerBlank, sessionId === void 0 && ConversationRoot_module_css_default.headerSessionless),
++				"data-dsh-conversation-header": "",
+ 				"data-window-drag": true,
+ 				children: [(0, react_jsx_runtime.jsx)("div", {
+ 					className: ConversationRoot_module_css_default.headerLeading,
+@@ -18700,13 +18756,16 @@ window.__ModuleLoader__.load({
  		}
  		//#endregion
  		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-conversation/src/client/skeleton/InputBar.module.css.mjs
@@ -94,9 +161,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  			document.head.appendChild(tag);
  		}
  		var InputBar_module_css_default = {
- 			"accessory": "uV2eYG_accessory",
-@@ -18727,8 +18739,9 @@
- 			"overlayAnchor": "uV2eYG_overlayAnchor",
+@@ -18728,6 +18787,7 @@ window.__ModuleLoader__.load({
  			"pending": "uV2eYG_pending",
  			"placeholder": "uV2eYG_placeholder",
  			"primary": "uV2eYG_primary",
@@ -104,20 +169,60 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  			"retry": "uV2eYG_retry",
  			"root": "uV2eYG_root",
  			"row": "uV2eYG_row",
- 			"scroll": "uV2eYG_scroll",
-@@ -18753,9 +18766,9 @@
- 		* keymap registers submit/menu/paste gestures on the editor command layer.
+@@ -18754,11 +18814,32 @@ window.__ModuleLoader__.load({
  		* The no-session state renders the SAME div inert as the Workspace-picker
  		* trigger instead of a parallel tree.
  		*/
 -		const InputBar = (0, react.memo)(function InputBar({ useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments, retryFileUpload, toggleCommandMenu, stop, t, renderSlot, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher, useStopShortcut, useProjection, sessionId, variant, disabled: inert = false, blocked, workspacePickerOpen = false, onRequestWorkspace, placeholder, accessory }) {
-+		const InputBar = (0, react.memo)(function InputBar({ useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments, retryFileUpload, toggleCommandMenu, stop, t, renderSlot, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher, useStopShortcut, useProjection, sessionId, variant, disabled: inert = false, blocked, workspacePickerOpen = false, onRequestWorkspace, placeholder, accessory, extensionZone, openUploadedFile }) {
++		/*
++		* Desktop patch: the Send tooltip names the preferred action, then the action the
++		* primary-modifier Enter chord performs immediately before that chord's keycaps.
++		* Both labels arrive already localized. The chord is advertised only when a
++		* complementary action exists AND its keycaps resolved, so the bubble can never
++		* claim a keybinding that would not run, nor show a chord without its action.
++		*/
++		/* @dsh-desktop:begin compose-send-tooltip */
++		function composeSendTooltip({ label, keys, complementaryLabel, complementaryKeys }) {
++			if (complementaryLabel === null || complementaryKeys.length === 0) return {
++				label,
++				shortcutKeys: keys
++			};
++			return {
++				label: `${label} · ${complementaryLabel}`,
++				shortcutKeys: complementaryKeys
++			};
++		}
++		/* @dsh-desktop:end compose-send-tooltip */
++		const InputBar = (0, react.memo)(function InputBar({ useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments, retryFileUpload, toggleCommandMenu, stop, t, renderSlot, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher, useStopShortcut, useComplementaryShortcut = () => [], useProjection, sessionId, variant, disabled: inert = false, blocked, workspacePickerOpen = false, onRequestWorkspace, placeholder, accessory, extensionZone, openUploadedFile }) {
  			const input = useInput((s) => s);
  			const notice = useNotices((s) => s);
  			const busyEnter = useBusyEnter((s) => s);
  			const stopKeys = useStopShortcut((keys) => keys);
-@@ -18998,12 +19011,8 @@
- 								className: InputBar_module_css_default.overlayAnchor,
++			/* Desktop patch: platform keycaps for the Cmd/Ctrl-accelerated submit chord. */
++			const complementaryKeys = useComplementaryShortcut((keys) => keys);
+ 			const commandMenuOpen = useMenuLauncher((source) => source === "command");
+ 			const [activity, setActivity] = (0, react.useState)(false);
+ 			(0, react.useEffect)(() => {
+@@ -18951,6 +19032,18 @@ window.__ModuleLoader__.load({
+ 			const primarySubmitMode = resolveSubmitMode(busyEnter, running, "enter", steeringAvailable);
+ 			const plainMessageDraft = !empty && input?.phase === "plain" && !draft.trimStart().startsWith("/");
+ 			const primaryLabel = primaryStops ? t("input.stop") : running && steeringAvailable && !disabled && !uploadsPending && plainMessageDraft ? t(primarySubmitMode === "steer" ? "input.send.steer" : "input.send.queue") : t("input.send");
++			/*
++			* Desktop patch: the Send button performs the preferred busy-Enter behavior,
++			* while the chord performs its complement. `complementaryLabel` names that
++			* complement so the bubble never reads as if the chord pressed this button.
++			*/
++			const complementaryLabel = running && steeringAvailable && !disabled && !uploadsPending && plainMessageDraft ? t(primarySubmitMode === "steer" ? "input.send.queue" : "input.send.steer") : null;
++			const sendTooltip = composeSendTooltip({
++				label: primaryStops ? t("input.stop") : primaryLabel,
++				keys: primaryStops ? stopKeys : void 0,
++				complementaryLabel: primaryStops ? null : complementaryLabel,
++				complementaryKeys
++			});
+ 			const onPrimary = () => {
+ 				if (primaryStops) {
+ 					stop?.();
+@@ -18999,10 +19092,6 @@ window.__ModuleLoader__.load({
  								"data-composer-overlay": true,
  								children: renderSlot("conversation.input.overlay", {})
  							}),
@@ -128,9 +233,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  							renderSlot("conversation.input.attachments", {
  								attachments,
  								canAcceptDrop,
- 								onAddFiles: intakeFiles,
-@@ -19013,27 +19022,37 @@
- 								uploads,
+@@ -19014,25 +19103,35 @@ window.__ModuleLoader__.load({
  								onRetryFile: (id) => {
  									retryFileUpload?.(id);
  								},
@@ -180,9 +283,18 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  							}),
  							(0, react_jsx_runtime.jsxs)("div", {
  								ref: rowRef,
- 								className: InputBar_module_css_default.row,
-@@ -19159,10 +19178,9 @@
- 						]
+@@ -19116,8 +19215,8 @@ window.__ModuleLoader__.load({
+ 											})
+ 										}),
+ 										(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+-											label: primaryStops ? t("input.stop") : primaryLabel,
+-											shortcutKeys: primaryStops ? stopKeys : void 0,
++											label: sendTooltip.label,
++											shortcutKeys: sendTooltip.shortcutKeys,
+ 											side: "top",
+ 											delayMs: 500,
+ 											disabled: primaryDisabled,
+@@ -19160,8 +19259,7 @@ window.__ModuleLoader__.load({
  					}),
  					(0, react_jsx_runtime.jsxs)("div", {
  						className: InputBar_module_css_default.dock,
@@ -192,9 +304,32 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  							useProjection,
  							t
  						})]
- 					})
-@@ -19765,8 +19783,16 @@
- 					},
+@@ -19606,6 +19704,8 @@ window.__ModuleLoader__.load({
+ 				scopedConversation(sessions, sessionId).cancel().catch((_error) => {});
+ 			};
+ 			const stopShortcut = (0, _deepseek_ai_dsh_client_store.createSnapshotStore)([]);
++			/* Desktop patch: platform keycaps for the Send tooltip's complementary submit chord. */
++			const complementaryShortcut = (0, _deepseek_ai_dsh_client_store.createSnapshotStore)([]);
+ 			ctx.inject(["shortcuts"], (scope) => {
+ 				const fixedInputs = [
+ 					{
+@@ -19688,6 +19788,15 @@ window.__ModuleLoader__.load({
+ 						dispose();
+ 					};
+ 				}, "ui-conversation: fixed stop reference");
++				scope.effect(() => {
++					complementaryShortcut.set(scope.shortcuts.describeBinding({
++						code: "Enter",
++						modifiers: ["primary"]
++					}).keys);
++					return () => {
++						complementaryShortcut.set([]);
++					};
++				}, "ui-conversation: fixed complementary reference");
+ 			});
+ 			const inputHub = new InputHub(ctx, t);
+ 			const composerBlocks = new ComposerBlockRegistry();
+@@ -19766,6 +19875,14 @@ window.__ModuleLoader__.load({
  					"conversation.hero.options": {
  						kind: "list",
  						scope: "session"
@@ -209,9 +344,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  					}
  				},
  				slots: {
- 					views: { scope: "session" },
-@@ -19888,8 +19914,12 @@
- 					"conversation.input.overlay": {
+@@ -19889,6 +20006,10 @@ window.__ModuleLoader__.load({
  						kind: "list",
  						scope: "session"
  					},
@@ -222,9 +355,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  					"conversation.input.permission": {
  						kind: "single",
  						scope: "session"
- 					},
-@@ -19924,8 +19954,9 @@
- 						addFiles: void 0,
+@@ -19925,10 +20046,12 @@ window.__ModuleLoader__.load({
  						removeAttachment: void 0,
  						resolveDraftAttachments: void 0,
  						retryFileUpload: void 0,
@@ -233,8 +364,11 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  						stop: void 0,
  						hooks: {
  							stopShortcut,
-@@ -19990,8 +20021,13 @@
- 						resolveDraftAttachments: (ids) => conversation.resolveDraftAttachments(ids),
++							complementaryShortcut,
+ 							busyEnter: submissionPolicy.busyEnter,
+ 							fileUploads: ABSENT_FILE_UPLOADS,
+ 							notices: ABSENT_NOTICES,
+@@ -19991,6 +20114,11 @@ window.__ModuleLoader__.load({
  						retryFileUpload: (id) => {
  							if (sessions.binding(sessionId) !== void 0) conversation.retryFileUpload(sessionId, id);
  						},
@@ -246,9 +380,15 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  						toggleCommandMenu: inputTriggers === void 0 ? void 0 : (selection) => {
  							shell.dismissPopup();
  							const snapshot = shell.snapshot;
- 							inputTriggers.toggleSource("command", {
-@@ -20022,12 +20058,9 @@
- 			slots.inject("main", function* () {
+@@ -20010,6 +20138,7 @@ window.__ModuleLoader__.load({
+ 						},
+ 						hooks: {
+ 							stopShortcut,
++							complementaryShortcut,
+ 							busyEnter: submissionPolicy.busyEnter,
+ 							fileUploads: conversation.fileUploads,
+ 							notices: shell.notices,
+@@ -20023,10 +20152,7 @@ window.__ModuleLoader__.load({
  				yield slots.register({
  					name: "main",
  					key: "conversation",
@@ -260,12 +400,11 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js 
  				}, ConversationPanel);
  				yield registerConversationRoot();
  				yield registerConversationContent();
- 				yield registerConversationSession();
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/slots.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/slots.d.ts
+index 14e942f..1d4a39e 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/slots.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/slots.d.ts
-@@ -193,8 +193,14 @@
-                     node: UserTextNode<Id>;
+@@ -194,6 +194,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
                  };
              };
          };
@@ -278,9 +417,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/clie
          /** Conversation shell beneath its root-scoped main-panel entry. */
          'main.conversation': {
              kind: 'single';
-             scope: 'session-maybe';
-@@ -290,8 +296,20 @@
-         'conversation.hero.options': {
+@@ -291,6 +297,18 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
              kind: 'list';
              scope: 'session';
          };
@@ -299,9 +436,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/clie
          /** Full-width entries above the composer card. */
          'conversation.input.dock': {
              kind: 'list';
-             scope: 'session';
-@@ -301,12 +319,19 @@
-         'conversation.input.overlay': {
+@@ -302,10 +320,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
              kind: 'list';
              scope: 'session';
          };
@@ -319,9 +454,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/clie
          };
          /** Compact controls at the left of the composer tool row. */
          'conversation.input.left': {
-             kind: 'list';
-@@ -524,10 +549,12 @@
-     workspacePickerOpen?: boolean;
+@@ -525,8 +550,10 @@ export interface ComposerBarOwnerProps {
      /** Open the Workspace picker from the inert composer surface. */
      onRequestWorkspace?: () => void;
      placeholder?: string;
@@ -333,9 +466,19 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/clie
  }
  /** Package-private operations injected into the resident composer bar. */
  export interface ComposerBarInjected {
-     keyboard: ComposerKeyboard | undefined;
-@@ -570,9 +597,9 @@
-     /** @param active - whether the occupant needs the toolbar width before the submit action. */
+@@ -548,6 +575,11 @@ export interface ComposerBarInjected {
+     hooks: {
+         /** Readable sequence while the fixed Stop command is registered. */
+         stopShortcut: ObservableSnapshot<readonly string[]>;
++        /**
++         * Platform keycaps for the primary-modifier Enter chord, whose action is
++         * the complement of `busyEnter`; empty until the shortcuts service binds.
++         */
++        complementaryShortcut: ObservableSnapshot<readonly string[]>;
+         /**
+          * Live busy-state submission preference: the delivery mode plain Enter
+          * and the primary Send button use while the addressed agent is busy.
+@@ -571,7 +603,7 @@ export interface InputActivityOwnerProps extends InputControlOwnerProps {
      onActiveChange: (active: boolean) => void;
  }
  /** Full props of the resident composer bar. */
@@ -344,17 +487,15 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/clie
  /** Owner values used to elect a composer takeover. */
  export interface ComposerChainProps {
      /** Current Session identity used by temporary business-owned entries. */
-     sessionId: SessionId | undefined;
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/skeleton/ConversationPanel.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/skeleton/ConversationPanel.d.ts
+index 046ea88..aed438a 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/skeleton/ConversationPanel.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/skeleton/ConversationPanel.d.ts
-@@ -4,6 +4,6 @@
-  * Render the Conversation with optional current-Session binding.
+@@ -5,5 +5,5 @@ import type { PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-
   * @param props - main-slot inputs and the declared Conversation renderer.
   * @returns the Conversation subtree.
   */
 -export declare function ConversationPanel({ renderSlot }: PropsRuntime<'main'> & PropsRenderSlots<'main.conversation'>): import("react").ReactNode;
--//# sourceMappingURL=ConversationPanel.d.ts.map
-\ No newline at end of file
 +export declare function ConversationPanel({ renderSlot }: PropsRuntime<'main'> & PropsRenderSlots<'main.conversation' | 'desktop.workbench.frame'>): import("react").ReactNode;
-+//# sourceMappingURL=ConversationPanel.d.ts.map
+ //# sourceMappingURL=ConversationPanel.d.ts.map
+\ No newline at end of file
