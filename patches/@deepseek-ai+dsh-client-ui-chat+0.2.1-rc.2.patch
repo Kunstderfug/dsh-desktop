@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
-index 9700d03..b79b64b 100644
+index 9700d03..7ecfd75 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
 @@ -93,6 +93,23 @@ window.__ModuleLoader__.load({
@@ -167,16 +167,18 @@ index 9700d03..b79b64b 100644
  				loadImage,
  				renderFactorySlot,
  				t
-@@ -5793,6 +5830,8 @@ window.__ModuleLoader__.load({
+@@ -5793,6 +5830,10 @@ window.__ModuleLoader__.load({
  			"stats.dialog.toolTime": "工具调用用时",
  			"stats.dialog.ttft": "首 token 平均（TTFT）",
  			"stats.dialog.speed": "输出速度（TPS）",
 +			"stats.dialog.price": "费用",
++			"stats.dialog.peak": "高峰",
++			"stats.dialog.offPeak": "非高峰",
 +			"stats.dialog.glmQuota": "GLM 套餐",
  			"chat.loadingHistory": "载入历史…",
  			"chat.loadError": "历史加载失败：{message}（{code}）",
  			"chat.loadOlder": "加载更早",
-@@ -5880,7 +5919,8 @@ window.__ModuleLoader__.load({
+@@ -5880,7 +5921,8 @@ window.__ModuleLoader__.load({
  			"message.failure.accountSignedOut": "任务已因退出 DeepSeek 登录而停止。",
  			"message.failure.interrupted": "DSH 进程在本轮完成前退出（例如被强制结束、崩溃或关闭超时），重新启动后本轮已中止。未完成的工具调用结果未知。",
  			"message.failure.accountSignInRequired": "请先登录 DeepSeek，并确认请求地址支持账号认证。",
@@ -186,16 +188,18 @@ index 9700d03..b79b64b 100644
  			"message.turnError": "本轮运行失败",
  			"message.maxTokens": "已达到输出 token 上限",
  			"message.maxTokens.hint": "回答被截断，已有输出保留在对话中。发送“继续”可让模型接着输出。",
-@@ -5987,6 +6027,8 @@ window.__ModuleLoader__.load({
+@@ -5987,6 +6029,10 @@ window.__ModuleLoader__.load({
  			"stats.dialog.toolTime": "Tool time",
  			"stats.dialog.ttft": "Avg time to first token (TTFT)",
  			"stats.dialog.speed": "Tokens per second (TPS)",
 +			"stats.dialog.price": "Price",
++			"stats.dialog.peak": "Peak",
++			"stats.dialog.offPeak": "Off-peak",
 +			"stats.dialog.glmQuota": "GLM plan",
  			"chat.loadingHistory": "Loading history…",
  			"chat.loadError": "Failed to load history: {message} ({code})",
  			"chat.loadOlder": "Load earlier",
-@@ -6074,7 +6116,8 @@ window.__ModuleLoader__.load({
+@@ -6074,7 +6120,8 @@ window.__ModuleLoader__.load({
  			"message.failure.accountSignedOut": "Stopped because you signed out of DeepSeek.",
  			"message.failure.interrupted": "The DSH process exited before this turn finished (for example, it was killed, crashed, or timed out while shutting down), so the turn was closed when DSH restarted. Unfinished tool calls have unknown outcomes.",
  			"message.failure.accountSignInRequired": "Sign in to DeepSeek and ensure the request destination supports account authentication.",
@@ -205,7 +209,7 @@ index 9700d03..b79b64b 100644
  			"message.turnError": "This turn failed",
  			"message.maxTokens": "Output token limit reached",
  			"message.maxTokens.hint": "The reply was cut off; earlier output is preserved in the conversation. Send \"continue\" to let the model resume.",
-@@ -7294,11 +7337,12 @@ window.__ModuleLoader__.load({
+@@ -7294,11 +7341,12 @@ window.__ModuleLoader__.load({
  		* @param props - prepared content, facts, authorized image loader, and framework Factory/locale seats.
  		* @returns the content stack using the existing user-message layout.
  		*/
@@ -220,7 +224,7 @@ index 9700d03..b79b64b 100644
  			return (0, react_jsx_runtime.jsxs)("div", {
  				className: MessageItem_module_css_default.userStack,
  				children: [
-@@ -7310,8 +7354,11 @@ window.__ModuleLoader__.load({
+@@ -7310,8 +7358,11 @@ window.__ModuleLoader__.load({
  							loadImage,
  							align: "end",
  							compact: compactImages
@@ -234,7 +238,7 @@ index 9700d03..b79b64b 100644
  							title: attachment.file.name,
  							children: [(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.FileTypeIcon, {
  								path: attachment.file.name,
-@@ -7339,8 +7386,9 @@ window.__ModuleLoader__.load({
+@@ -7339,8 +7390,9 @@ window.__ModuleLoader__.load({
  							label: t("message.extraBlock"),
  							payload: block,
  							truncatedLabel: truncated
@@ -245,7 +249,7 @@ index 9700d03..b79b64b 100644
  					referenceLabels.length > 0 && (0, react_jsx_runtime.jsx)("div", {
  						className: MessageItem_module_css_default.referenceSummary,
  						children: t("message.referenceSummary", { labels: referenceLabels.join(t("message.referenceSeparator")) })
-@@ -7471,6 +7519,214 @@ window.__ModuleLoader__.load({
+@@ -7471,6 +7523,227 @@ window.__ModuleLoader__.load({
  		function billedInputTokens(usage) {
  			return usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
  		}
@@ -321,6 +325,19 @@ index 9700d03..b79b64b 100644
 +		function formatSessionPrice(price) {
 +			const decimals = price.usd < 1 ? 4 : 2;
 +			return `${price.partial ? "\u2265" : ""}$${price.usd.toFixed(decimals)}`;
++		}
++		/**
++		* Whether DeepSeek's peak window covers `time`: 01:00-04:00 and 06:00-10:00
++		* UTC, Monday-Friday. Mirrors the token-meter's usagePeakWindow so the
++		* statistics indicator names the same window the projection bills into.
++		* Chinese public holidays are not excluded, matching the projection.
++		*/
++		function sessionPeakWindow(time) {
++			const date = new Date(time);
++			const day = date.getUTCDay();
++			if (day === 0 || day === 6) return false;
++			const hour = date.getUTCHours() + date.getUTCMinutes() / 60;
++			return hour >= 1 && hour < 4 || hour >= 6 && hour < 10;
 +		}
 +		/**
 +		 * GLM Coding Plan quota, polled by the desktop main process and read here
@@ -460,7 +477,7 @@ index 9700d03..b79b64b 100644
  		function exactCount(value, t) {
  			return t("message.turnUsage.count", { count: formatExactTokens(value, t) });
  		}
-@@ -7565,6 +7821,9 @@ window.__ModuleLoader__.load({
+@@ -7565,6 +7838,9 @@ window.__ModuleLoader__.load({
  		const ActivityPill = (0, react.memo)(function ActivityPill({ useChat, useProjection, usePerformanceUsage, t }) {
  			const mode = usePerformanceUsage((value) => value);
  			const stats = useSessionStats(useChat, useProjection);
@@ -470,17 +487,17 @@ index 9700d03..b79b64b 100644
  			const speed = stats.decodeMs > 0 ? decodeSpeed(stats, t) : null;
  			const icon = (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconGaugeOutlineRegular, {});
  			if (mode === "compact") return speed === null ? null : (0, react_jsx_runtime.jsx)(PlainPill, {
-@@ -7594,7 +7853,8 @@ window.__ModuleLoader__.load({
+@@ -7594,7 +7870,8 @@ window.__ModuleLoader__.load({
  						stats.llmMs > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.llmTime") }), (0, react_jsx_runtime.jsx)("dd", { children: formatDuration(stats.llmMs, t) })] }),
  						stats.toolMs > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.toolTime") }), (0, react_jsx_runtime.jsx)("dd", { children: formatDuration(stats.toolMs, t) })] }),
  						stats.ttftSteps > 0 && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.ttft") }), (0, react_jsx_runtime.jsx)("dd", { children: formatDuration(stats.ttftMs / stats.ttftSteps, t) })] }),
 -						speed !== null && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.speed") }), (0, react_jsx_runtime.jsx)("dd", { children: speed })] })
 +						speed !== null && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.speed") }), (0, react_jsx_runtime.jsx)("dd", { children: speed })] }),
-+						price !== null && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.price") }), (0, react_jsx_runtime.jsx)("dd", { children: formatSessionPrice(price) })] }), (0, react_jsx_runtime.jsx)(GlmQuotaRow, { t, quota })
++						price !== null && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("stats.dialog.price") }), (0, react_jsx_runtime.jsx)("dd", { children: `${formatSessionPrice(price)} \u00b7 ${t(sessionPeakWindow(Date.now()) ? "stats.dialog.peak" : "stats.dialog.offPeak")}` })] }), (0, react_jsx_runtime.jsx)(GlmQuotaRow, { t, quota })
  					]
  				})
  			});
-@@ -13054,7 +13314,8 @@ window.__ModuleLoader__.load({
+@@ -13054,7 +13331,8 @@ window.__ModuleLoader__.load({
  			"configForms",
  			"remote",
  			"remote.session",
@@ -490,7 +507,7 @@ index 9700d03..b79b64b 100644
  		];
  		/**
  		* Mount all Chat-owned contributions.
-@@ -13144,6 +13405,14 @@ window.__ModuleLoader__.load({
+@@ -13144,6 +13422,14 @@ window.__ModuleLoader__.load({
  				}, LinkOpeningRow));
  			});
  			const transcriptView = new TranscriptViewPolicy(chatSettings, "dshDesktop" in globalThis ? "standard" : DEFAULT_TRANSCRIPT_VIEW_MODE);
@@ -505,7 +522,7 @@ index 9700d03..b79b64b 100644
  			const presentation = derivePresentationPolicy(transcriptView.mode, transcriptView.collapseTiming);
  			const performancePolicy = new PerformanceUsagePolicy(chatSettings);
  			ctx.effect(() => () => {
-@@ -13156,6 +13425,7 @@ window.__ModuleLoader__.load({
+@@ -13156,6 +13442,7 @@ window.__ModuleLoader__.load({
  				name: "conversation.chat.user.content",
  				scope: "session",
  				locale: NS,
@@ -513,7 +530,7 @@ index 9700d03..b79b64b 100644
  				children: { "conversation.chat.user.images": {
  					kind: "single",
  					scope: "session"
-@@ -13208,7 +13478,7 @@ window.__ModuleLoader__.load({
+@@ -13208,7 +13495,7 @@ window.__ModuleLoader__.load({
  				name: "conversation.chat.flow",
  				locale: NS,
  				store: chatStore,
@@ -522,7 +539,7 @@ index 9700d03..b79b64b 100644
  					kind: "keyed",
  					scope: "session",
  					inject: CHAT_NODE_INJECT
-@@ -13242,10 +13512,22 @@ window.__ModuleLoader__.load({
+@@ -13242,10 +13529,22 @@ window.__ModuleLoader__.load({
  							fileMentions: (owner) => ctx.get("chatFileMentions")?.forClosing(owner, sessionId),
  							openFile: async (path, options) => {
  								const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd;
@@ -549,7 +566,7 @@ index 9700d03..b79b64b 100644
  							},
  							openExternalLink: (url) => {
  								if (linkOpening.getSnapshot() === "sidebar" && ctx.get("sidebarRightTabs")?.get("browser") !== void 0) ctx.sidebarRight.openTab("browser", { params: { url } });
-@@ -13325,6 +13607,13 @@ window.__ModuleLoader__.load({
+@@ -13325,6 +13624,13 @@ window.__ModuleLoader__.load({
  					locale: NS,
  					inject: statPillInject
  				}, UsagePill);
@@ -563,19 +580,20 @@ index 9700d03..b79b64b 100644
  			});
  			ctx.slots.inject("conversation.approval.detail", () => ctx.slots.register({ name: "conversation.approval.detail" }, ApprovalCommand));
  		}
-@@ -13334,6 +13623,10 @@ window.__ModuleLoader__.load({
+@@ -13334,6 +13640,11 @@ window.__ModuleLoader__.load({
  		exports.inject = inject;
  		exports.isRunningTool = isRunningTool;
  		exports.isSettledTool = isSettledTool;
 +		exports.SESSION_PRICE_TABLE = SESSION_PRICE_TABLE;
 +		exports.sessionPrice = sessionPrice;
 +		exports.formatSessionPrice = formatSessionPrice;
++		exports.sessionPeakWindow = sessionPeakWindow;
 +
  		return module.exports;
  	}
  });
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/types/client/contract/slots.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/types/client/contract/slots.d.ts
-index 8a03bd5..4453250 100644
+index 8a03bd5..38180a2 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/types/client/contract/slots.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/types/client/contract/slots.d.ts
 @@ -33,12 +33,18 @@ export type UsePresentation = SnapshotSelectorHook<ChatPresentationPolicy>;

@@ -52,6 +52,7 @@ interface ChatExports {
   SESSION_PRICE_TABLE: Record<string, PriceRow>
   sessionPrice(routes: unknown): Price | null
   formatSessionPrice(price: Price): string
+  sessionPeakWindow(time: number): boolean
 }
 
 const buckets = (
@@ -227,11 +228,32 @@ describe('session price in the statistics sheet', () => {
     expect(formatSessionPrice({ usd: 12.3, partial: false })).toBe('$12.30')
   })
 
+  it('names the billing window the meter bills into', async () => {
+    const { sessionPeakWindow } = await chatExports()
+    const minute = (day: number, hour: number, min: number) => Date.UTC(2026, 8, day, hour, min)
+
+    // The rule mirrors the meter's usagePeakWindow: 01:00-04:00 and
+    // 06:00-10:00 UTC, Monday-Friday only. Sep 7 is a Monday.
+    expect(sessionPeakWindow(minute(7, 0, 59))).toBe(false)
+    expect(sessionPeakWindow(minute(7, 1, 0))).toBe(true)
+    expect(sessionPeakWindow(minute(7, 3, 59))).toBe(true)
+    expect(sessionPeakWindow(minute(7, 4, 0))).toBe(false)
+    expect(sessionPeakWindow(minute(7, 5, 59))).toBe(false)
+    expect(sessionPeakWindow(minute(7, 6, 0))).toBe(true)
+    expect(sessionPeakWindow(minute(7, 9, 59))).toBe(true)
+    expect(sessionPeakWindow(minute(7, 10, 0))).toBe(false)
+    // Sep 12 is a Saturday: weekends never bill at peak.
+    expect(sessionPeakWindow(minute(12, 2, 0))).toBe(false)
+    expect(sessionPeakWindow(minute(12, 7, 0))).toBe(false)
+  })
+
   it('renders the price row after the tokens-per-second row of the sheet', async () => {
     const chat = await readFile(chatBundle, 'utf8')
 
     expect(chat).toContain('useProjection("routeUsage")')
     expect(chat).toContain('"stats.dialog.price"')
+    // The price value names the window the meter bills into right now.
+    expect(chat).toContain('sessionPeakWindow(Date.now())')
 
     const details = chat.slice(chat.indexOf('"data-session-stats-details": true'))
     const speed = details.indexOf('stats.dialog.speed')
@@ -249,6 +271,9 @@ describe('session price in the statistics sheet', () => {
 
     expect(chatPatch).toContain('stats.dialog.price')
     expect(chatPatch).toContain('sessionPrice')
+    expect(chatPatch).toContain('sessionPeakWindow')
+    expect(chatPatch).toContain('"stats.dialog.peak"')
+    expect(chatPatch).toContain('"stats.dialog.offPeak"')
     expect(meterBundleContent).toContain('routeUsageProjectionDefinition')
     expect(meterBundleContent).toContain('ctx.sessionProjections.register(routeUsageProjectionDefinition)')
   })
