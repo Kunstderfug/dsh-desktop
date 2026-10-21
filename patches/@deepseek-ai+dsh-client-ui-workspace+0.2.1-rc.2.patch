@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
-index 5cca45b..be486e9 100644
+index 5cca45b..73ab2b4 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
 @@ -956,17 +956,40 @@ window.__ModuleLoader__.load({
@@ -558,7 +558,7 @@ index 5cca45b..be486e9 100644
  			const guardedOpen = (sessionId) => {
  				if (archivedSessionIds.includes(sessionId)) {
  					notifyArchivedNotOpenable();
-@@ -3658,7 +3864,19 @@ window.__ModuleLoader__.load({
+@@ -3658,7 +3864,43 @@ window.__ModuleLoader__.load({
  			});
  			const searchRoot = (0, react.useRef)(null);
  			const searchInput = (0, react.useRef)(null);
@@ -570,16 +570,40 @@ index 5cca45b..be486e9 100644
 +			(0, react.useEffect)(() => {
 +				if (!shortcutState.addRequested) setWsPickerLocalOpen(false);
 +			}, [shortcutState.addRequested]);
++			/* WorkspacePickFlow rebuilds its auto-open callback from `onClose`
++			* (`useCallback(..., [onClose])`) and re-fires the auto-open effect
++			* whenever that identity changes. Inline arrows at the call site gave a
++			* fresh identity on every render while `closeAdd`/`directoryBusy`
++			* allocated a new snapshot on every report, so the effect re-armed
++			* itself until React bailed with error #185 (maximum update depth) and
++			* the sidebar slot unmounted. Keep handler identities stable and skip
++			* no-op store writes. */
++			const closeWsPicker = (0, react.useCallback)(() => {
++				setWsPickerLocalOpen(false);
++				if (shortcutState.addRequested) closeAddWorkspace();
++			}, [shortcutState.addRequested, closeAddWorkspace]);
++			const pickWsAndStart = (0, react.useCallback)((workspaceId) => {
++				closeWsPicker();
++				startSession(workspaceId, { clearPreviousDraft: false });
++			}, [closeWsPicker, startSession]);
++			const wsDirectoryBusyRef = (0, react.useRef)(false);
++			const reportWsDirectoryBusy = (0, react.useCallback)((busy) => {
++				/* Upstream allocates a fresh snapshot per busy report; forward only
++				* real transitions so flow mounts do not re-render the whole list. */
++				if (wsDirectoryBusyRef.current === busy) return;
++				wsDirectoryBusyRef.current = busy;
++				setDirectoryBusy(busy);
++			}, [setDirectoryBusy]);
 +			const setWsPickerOpen = (update) => {
 +				const next = typeof update === "function" ? update(shortcutState.addRequested || wsPickerLocalOpen) : update;
 +				setWsPickerLocalOpen(next);
 +				if (next) requestAddWorkspace();
-+				else closeAddWorkspace();
++				else if (shortcutState.addRequested) closeAddWorkspace();
 +			};
  			const wsPlusRef = (0, react.useRef)(null);
  			const composingRef = (0, react.useRef)(false);
  			const openSearchResult = (sessionId) => {
-@@ -3798,6 +4016,11 @@ window.__ModuleLoader__.load({
+@@ -3798,6 +4040,11 @@ window.__ModuleLoader__.load({
  			const [deleting, setDeleting] = (0, react.useState)(false);
  			const [deleteCommittedId, setDeleteCommittedId] = (0, react.useState)(null);
  			const [deleteError, setDeleteError] = (0, react.useState)(null);
@@ -591,7 +615,7 @@ index 5cca45b..be486e9 100644
  			(0, react.useEffect)(() => {
  				if (deleteCommittedId === null || workspaces.some((workspace) => workspace.workspaceId === deleteCommittedId)) return;
  				setDeleting(false);
-@@ -3812,6 +4035,10 @@ window.__ModuleLoader__.load({
+@@ -3812,6 +4059,10 @@ window.__ModuleLoader__.load({
  			const confirmDelete = () => {
  				/* v8 ignore next -- the Modal is absent without a target and its button is disabled while deleting. */
  				if (deleting || deleteTarget === null) return;
@@ -602,7 +626,7 @@ index 5cca45b..be486e9 100644
  				setDeleting(true);
  				setDeleteCommittedId(null);
  				setDeleteError(null);
-@@ -3913,10 +4140,12 @@ window.__ModuleLoader__.load({
+@@ -3913,10 +4164,12 @@ window.__ModuleLoader__.load({
  										ref: wsPlusRef,
  										type: "button",
  										className: WorkspaceBrowser_module_css_default.iconButton,
@@ -616,7 +640,26 @@ index 5cca45b..be486e9 100644
  										},
  										children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconProjectAddOutlineRegular, { size: wide ? 16 : 18 })
  									})
-@@ -3964,7 +4193,7 @@ window.__ModuleLoader__.load({
+@@ -3931,15 +4184,10 @@ window.__ModuleLoader__.load({
+ 								useDirectoryFlow,
+ 								renderDirectoryFlow: (owner) => renderSlot("sidebar.workspaces.directoryFlow", owner),
+ 								addOnly: true,
+-								onBusyChange: setDirectoryBusy,
++								onBusyChange: reportWsDirectoryBusy,
+ 								side: "right",
+-								onPick: (workspaceId) => {
+-									closeAddWorkspace();
+-									startSession(workspaceId, { clearPreviousDraft: false });
+-								},
+-								onClose: () => {
+-									closeAddWorkspace();
+-								}
++								onPick: pickWsAndStart,
++								onClose: closeWsPicker
+ 							})
+ 						]
+ 					}),
+@@ -3964,7 +4212,7 @@ window.__ModuleLoader__.load({
  						className: WorkspaceBrowser_module_css_default.listArea,
  						children: wide && (normalizedQuery !== "" ? (0, react_jsx_runtime.jsx)(SearchResults, {
  							usePanelInfo,
@@ -625,7 +668,7 @@ index 5cca45b..be486e9 100644
  							useSessionStatus,
  							open: openSearchResult,
  							onUnarchive: onSessionUnarchive,
-@@ -3980,6 +4209,8 @@ window.__ModuleLoader__.load({
+@@ -3980,6 +4228,8 @@ window.__ModuleLoader__.load({
  							list,
  							sessionIds: orderedFlatSessionIds,
  							rowState,
@@ -634,7 +677,7 @@ index 5cca45b..be486e9 100644
  							onLeaveArchivedOnly: leaveArchivedOnly,
  							workspaceReady,
  							animationResetKey: `${groupBy}/${orderBy}/${archivedFilter}`,
-@@ -4007,6 +4238,8 @@ window.__ModuleLoader__.load({
+@@ -4007,6 +4257,8 @@ window.__ModuleLoader__.load({
  							setGroupExpanded: actions.setGroupExpanded,
  							setSessionOrder: saveSessionOrder,
  							rowState,
@@ -643,7 +686,7 @@ index 5cca45b..be486e9 100644
  							onLeaveArchivedOnly: leaveArchivedOnly,
  							startSession,
  							open: guardedOpen,
-@@ -4026,7 +4259,8 @@ window.__ModuleLoader__.load({
+@@ -4026,7 +4278,8 @@ window.__ModuleLoader__.load({
  							onDeleteRequest: (workspaceId, title) => {
  								setDeleteTarget({
  									workspaceId,
@@ -653,7 +696,7 @@ index 5cca45b..be486e9 100644
  								});
  								setDeleteError(null);
  							}
-@@ -4752,6 +4986,7 @@ window.__ModuleLoader__.load({
+@@ -4752,6 +5005,7 @@ window.__ModuleLoader__.load({
  			"draft.initializationFailed": "暂时无法填入草稿，请稍后重试",
  			"group.ungrouped": "未分组",
  			"session.new": "新会话",
@@ -661,7 +704,7 @@ index 5cca45b..be486e9 100644
  			"session.untitled": "未命名",
  			"shortcut.noSession": "请先选择一个会话",
  			"shortcut.noPicker": "目录选择器不可用",
-@@ -4856,6 +5091,7 @@ window.__ModuleLoader__.load({
+@@ -4856,6 +5110,7 @@ window.__ModuleLoader__.load({
  			"status.compact.planReview": "计划待审",
  			"status.compact.answer": "待回答",
  			"status.completed": "已完成",
@@ -669,7 +712,7 @@ index 5cca45b..be486e9 100644
  			"hover.created": "创建于 {time}",
  			"hover.copied": "已复制",
  			"date.ymd": "{y}年{m}月{d}日",
-@@ -4874,6 +5110,7 @@ window.__ModuleLoader__.load({
+@@ -4874,6 +5129,7 @@ window.__ModuleLoader__.load({
  			"draft.initializationFailed": "Could not fill the draft. Please try again shortly.",
  			"group.ungrouped": "Ungrouped",
  			"session.new": "New Session",
@@ -677,7 +720,7 @@ index 5cca45b..be486e9 100644
  			"session.untitled": "Untitled",
  			"shortcut.noSession": "Select a session first",
  			"shortcut.noPicker": "Directory picker unavailable",
-@@ -4978,6 +5215,7 @@ window.__ModuleLoader__.load({
+@@ -4978,6 +5234,7 @@ window.__ModuleLoader__.load({
  			"status.compact.planReview": "Plan review",
  			"status.compact.answer": "Answer",
  			"status.completed": "Completed",
@@ -685,7 +728,7 @@ index 5cca45b..be486e9 100644
  			"hover.created": "Created {time}",
  			"hover.copied": "Copied",
  			"date.ymd": "{y}-{m}-{d}",
-@@ -5179,6 +5417,8 @@ window.__ModuleLoader__.load({
+@@ -5179,6 +5436,8 @@ window.__ModuleLoader__.load({
  				}
  			});
  			const browserInjected = () => ({
@@ -694,7 +737,7 @@ index 5cca45b..be486e9 100644
  				startSession: (workspaceId, options) => {
  					uiWorkspace.startSession(workspaceId, options);
  				},
-@@ -5193,7 +5433,7 @@ window.__ModuleLoader__.load({
+@@ -5193,7 +5452,7 @@ window.__ModuleLoader__.load({
  					await workspaces.rename(workspaceId, title);
  				},
  				deleteWorkspace: async (workspaceId) => {
@@ -703,7 +746,7 @@ index 5cca45b..be486e9 100644
  				},
  				insertWorkspaceBefore: async (workspaceId, beforeWorkspaceId) => {
  					await workspaces.insertBefore(workspaceId, beforeWorkspaceId);
-@@ -5209,6 +5449,8 @@ window.__ModuleLoader__.load({
+@@ -5209,6 +5468,8 @@ window.__ModuleLoader__.load({
  				hooks: {
  					directoryFlow: browserFlowSource,
  					hostInfo,
