@@ -25,8 +25,9 @@ with tempfile.TemporaryDirectory() as work:
         assert len(files) == count
         notes = build.build_notification('1.0.0-test.1', files, 'example/desktop', 'test/1.0.0-test.1/42', 'https://github.com/example/desktop/actions/runs/42')
         assert notes.count('/resolve/master/test/') == count
-        assert ('Windows 安装包' in notes) == (target != 'macos')
-        assert ('macOS 安装包' in notes) == (target != 'windows')
+        assert '测试建议' in notes
+        assert '本次为签名测试安装包' not in notes
+        assert '已通过签名' not in notes
         assert '客户端中更新' not in notes
     assert build.test_prefix('1.0.0-test.1', '42') == 'test/1.0.0-test.1/42'
     for version in ['../latest', 'v1.0.0', '1.0.0/test']:
@@ -127,10 +128,10 @@ print('signed test build behavior passed')
     const yaml = require('js-yaml') as { load(source: string): { jobs: Record<string, { needs: string[]; if: string }> } }
     const workflow = yaml.load(readFileSync('.github/workflows/release.yml', 'utf8'))
     const job = workflow.jobs['publish-signed-test']
-    expect(job?.needs).toEqual(['macos', 'sign-windows', 'smoke-signed-windows'])
+    expect(job?.needs).toEqual(['macos', 'sign-windows'])
     expect(job?.if).toContain("inputs.mode == 'signed'")
     expect(job?.if).toContain("inputs.target == 'windows' || needs.macos.result == 'success'")
-    expect(job?.if).toContain("needs.smoke-signed-windows.result == 'success'")
+    expect(job?.if).toContain("inputs.target == 'macos' || needs.sign-windows.result == 'success'")
   })
 
   it('lists features and descriptions since the nearest reachable tag using real git history', () => {
@@ -163,7 +164,8 @@ with tempfile.TemporaryDirectory() as work, contextlib.chdir(work):
     assert 'Per-page preview' in notes and 'Shows each completed page' in notes
     assert 'Retains archive history' in notes
     assert 'Historical feature' not in notes and 'Unrelated branch' not in notes
-    assert '/compare/v1.0.0...' in notes
+    assert '/compare/' not in notes
+    assert '完整代码比较' not in notes
     git('tag', 'V1.1.0')
     assert 'Per-page preview' in build.build_test_changes('https://github.com/example/desktop')
     commit('perf: Faster conversion')

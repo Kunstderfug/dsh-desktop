@@ -2752,6 +2752,48 @@ describe('workbench market screenshot and metadata display', () => {
     expect(ui.find(ui.render(), node => node.type?.name === 'DetailModal')[0].props.entry.catalogId).toBe('o/helper')
   })
 
+  it('pages market entries with a show more button and increments on demand', async () => {
+    const { service } = await fixture()
+    service.remoteCatalog = Array.from({ length: 30 }, (_, i) => ({
+      id: `owner/bench-${i}`,
+      name: `Bench ${i}`,
+      title: `Bench ${i}`,
+      owner: 'owner',
+      repository: `bench-${i}`,
+      url: `https://github.com/owner/bench-${i}`,
+      category: 'other',
+      description: { zh: `简介 ${i}` },
+      version: '1.0.0',
+      license: 'MIT',
+      distribution: { type: 'npm', version: '1.0.0' },
+      screenshots: [{ url: 'https://example.com/p.png', alt: 'p', sha256: 'a'.repeat(64), width: 800, height: 600, bytes: 100 }],
+      listed: true
+    }))
+    service.catalogLoaded = true
+    service.publish()
+
+    const ui = interactiveMarket(service, 'market')
+    let tree = ui.render()
+    let cards = ui.find(tree, node => node.type === 'article')
+    expect(cards).toHaveLength(24)
+
+    let moreButton = ui.find(tree, node => node.props?.className?.includes('dshWbMore') && node.type?.name === 'Button')[0]
+    expect(moreButton).toBeTruthy()
+    expect(moreButton.props.children).toEqual(['加载更多'])
+
+    let countHint = ui.find(tree, node => node.props?.className === 'dshWbMoreCount')[0]
+    expect(countHint.props.children).toEqual(['已显示 24 / 共 30 个工作台'])
+
+    // Click more
+    moreButton.props.onClick()
+    tree = ui.render()
+    cards = ui.find(tree, node => node.type === 'article')
+    expect(cards).toHaveLength(30)
+
+    moreButton = ui.find(tree, node => node.props?.className?.includes('dshWbMore') && node.type?.name === 'Button')[0]
+    expect(moreButton).toBeUndefined()
+  })
+
   it('makes the card title a repository link', async () => {
     const { service } = await fixture()
     service.remoteCatalog = [listed()]

@@ -28,11 +28,24 @@ export async function recoverStartupConfiguration(ops: ConfigRecoveryOperations)
     if (ops.cancelled?.()) return 'continue'
     const problem = (await inspectStartupConfiguration(ops.dshHome, ops.profile, ops.environment, ops.launchDirectory))[0]
     if (!problem) return changed ? 'retry' : 'continue'
-    const repairLabel = problem.repair === 'disable-legacy'
-      ? zh ? '备份并停用旧条目' : 'Back Up and Disable Legacy Entry'
-      : problem.repair === 'reset-endpoint'
-        ? zh ? '备份并恢复默认地址' : 'Back Up and Restore Default Endpoint'
-        : zh ? '备份并修复' : 'Back Up and Repair'
+    if (problem.kind === 'legacy-workflow' && problem.repair) {
+      try {
+        await ops.stop()
+        const backup = await repairStartupConfig(ops.dshHome, problem)
+        changed = true
+        ops.note(`[desktop] configuration recovery auto-migrated legacy-workflow to workflow-ptc; backup: ${backup}`)
+        continue
+      } catch (error) {
+        ops.note(`[desktop] configuration recovery auto-migration failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    const repairLabel = problem.repair === 'replace-legacy'
+      ? zh ? '升级工作流组件' : 'Upgrade Workflow Component'
+      : problem.repair === 'disable-legacy'
+        ? zh ? '备份并停用旧条目' : 'Back Up and Disable Legacy Entry'
+        : problem.repair === 'reset-endpoint'
+          ? zh ? '备份并恢复默认地址' : 'Back Up and Restore Default Endpoint'
+          : zh ? '备份并修复' : 'Back Up and Repair'
     const actions = [
       ...(problem.repair ? [{ id: 'repair', label: repairLabel }] : []),
       ...(problem.path && !problem.manualOnly ? [{ id: 'import', label: zh ? '导入修正文件或备份' : 'Import Corrected File or Backup' }] : []),

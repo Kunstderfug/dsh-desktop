@@ -39,7 +39,7 @@ it('recovers saved configuration and an old preset before booting a real Harness
     dshEntryPath: resolve('node_modules/@deepseek-ai/dsh/lib/bin.js'),
     nodeEntryPath: resolve('build/harness-node-entry.mjs'), nodeExecutablePath: resolveTestNodeExecutable(),
     dshPatchPath: resolve('build/dsh-desktop-safe.patch.yml'), dshSafePatchPath: resolve('build/dsh-desktop-safe.patch.yml'),
-    dshHome: home, logPath: join(home, 'runtime.log'), startupTimeoutMs: 30_000,
+    dshHome: home, logPath: join(home, 'runtime.log'), startupTimeoutMs: 30_000, preferredPort: 0,
     launchProcess: (executable, args, options) => spawn(executable, args, options), onChanged() {}
   })
   const backups: string[] = []
@@ -54,11 +54,12 @@ it('recovers saved configuration and an old preset before booting a real Harness
       selectFile: async () => ({ canceled: false, filePaths: [] }), reveal() {},
       note: line => backups.push(line)
     })).toBe('retry')
-    expect(backups).toHaveLength(3)
+    expect(runtime.snapshot().logs.join('\n')).toContain('auto-migrated legacy-workflow to workflow-ptc')
     expect(await inspectStartupConfiguration(home)).toEqual([])
     expect(await readFile(join(preset, 'agent.cordis.yml'), 'utf8')).toBe(legacy)
     const fixed = await readFile(join(profile, 'cordis.patch.yml'), 'utf8')
-    expect(fixed).toContain('disabled: true')
+    expect(fixed).toContain('@deepseek-ai/dsh-workflow-ptc')
+    expect(fixed).not.toContain('@deepseek-ai/dsh-workflow-worker-thread')
     expect(fixed).toContain('maxTokens: 8000')
     await migrateLegacyAgentPresets(home, () => {})
     expect(await readFile(join(profile, 'cordis.patch.yml'), 'utf8')).toBe(fixed)

@@ -164,7 +164,9 @@ async function verifyPackagedHarness(context) {
 }
 module.exports = { verifyDependencyClosure, verifyTerminal, verifyHarness, verifyPackagedHarness }
 if (require.main === module && process.argv[2] === '--verify-runtime') {
-  verifyRuntime(...process.argv.slice(3))
+  const [appRoot, resources, ...executableParts] = process.argv.slice(3)
+  const executable = executableParts.length ? executableParts.join(' ') : process.execPath
+  verifyRuntime(appRoot, resources, executable)
     .then(() => { process.exit(0) })
     .catch(error => { console.error(error); process.exit(1) })
 }

@@ -104,8 +104,6 @@ def build_test_changes(repository_url: str) -> str:
         sections[category].append(item)
     baseline = f"上一个 tag：`{previous}`" if previous else "无历史版本 tag，列出首次提测变更。"
     parts = ["**本次提测变更**", baseline, f"构建提交：`{head[:12]}`", "以下列表与说明来自该范围的提交记录，供提测核对。"]
-    if previous:
-        parts.append(f"[完整代码比较]({repository_url}/compare/{quote(previous, safe='')}...{head})")
     for title, items in sections.items():
         if items:
             parts.extend([f"**{title}**", "\n".join(items)])
@@ -114,23 +112,25 @@ def build_test_changes(repository_url: str) -> str:
     return "\n\n".join(parts)
 
 
+TEST_SUGGESTIONS = """\
+**测试建议**
+1. **安装与启动**：全新安装或覆盖升级，验证应用能否正常启动进入主界面。
+2. **基础对话与交互**：新建会话与模型问答交互，验证流式输出、工具调用（Tool Call）与思考过程折叠。
+3. **功能改动验证**：核对本次提测的变更与修复点，验证相关业务流程与插件（如 Office / PPT 等）运行正常。
+4. **配置与状态恢复**：测试修改设置、重启应用或异常退出后，数据与配置状态能否正常持久化与恢复。\
+"""
+
+
 def build_notification(version: str, installers: list[tuple[str, Path]], repo_id: str, prefix: str, run_url: str, changes: str = "") -> str:
     links = "\n".join(f"- [{label}]({download_url(repo_id, prefix, file.name)})" for label, file in installers)
-    checks = []
-    if any(label.startswith("macOS") for label, _ in installers):
-        checks.append("macOS 安装包已通过签名与公证检查。")
-    if any(label.startswith("Windows") for label, _ in installers):
-        checks.append("Windows 安装包已通过签名安装 smoke。")
     if len(changes) > 9000:
-        changes = changes[:8500].rsplit("\n", 1)[0] + "\n\n变更较多，完整列表与说明请查看下方文件。"
-    change_link = download_url(repo_id, prefix, "test-changes.md")
-    details = f"\n\n{changes}\n\n[完整提测变更说明]({change_link})" if changes else ""
+        changes = changes[:8500].rsplit("\n", 1)[0] + "\n\n变更较多，已截断展示。"
+    details = f"\n\n{changes}" if changes else ""
     return (
         f"**DSH Desktop {version} 测试打包完成**\n\n"
-        "本次为签名测试安装包，用于安装和功能验收，请手动下载安装。\n"
-        + "\n".join(checks)
+        f"**下载地址**\n{links}"
         + details
-        + f"\n\n**下载地址**\n{links}\n\n[CI 构建详情]({run_url})"
+        + f"\n\n{TEST_SUGGESTIONS}\n\n[查看 CI 构建详情]({run_url})"
     )
 
 

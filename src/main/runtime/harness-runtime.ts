@@ -11,7 +11,7 @@ import { prepareHostDisabledPluginsPatch } from '../state/host-disabled-plugins'
 import { prepareHostPluginSourcesPatch } from '../state/host-plugin-sources'
 import { parsePluginStartupFailures, type PluginStartupFailure } from '../../shared/plugin-startup-failure'
 import { removeStaleWriterLocks } from './stale-writer-locks'
-import { inspectStartupConfiguration, validModelEndpoint } from '../state/startup-config-recovery'
+import { inspectStartupConfiguration, repairStartupConfig, validModelEndpoint } from '../state/startup-config-recovery'
 
 export interface HarnessRuntimeOptions {
   dshEntryPath: string
@@ -575,6 +575,18 @@ export class HarnessRuntime {
       this.writeLog(`[desktop] configuration inspection failed: ${error instanceof Error ? error.message : String(error)}`)
       this.setState('failed', 'Startup configuration could not be inspected; check file access permissions.')
       return
+    }
+    const autoMigratable = configurationProblems.filter(problem => problem.kind === 'legacy-workflow' && problem.repair)
+    for (const problem of autoMigratable) {
+      try {
+        const backup = await repairStartupConfig(this.options.dshHome, problem)
+        this.writeLog(`[desktop] auto-migrated legacy-workflow to workflow-ptc; backup: ${backup}`)
+      } catch (error) {
+        this.writeLog(`[desktop] auto-migration of legacy-workflow failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    if (autoMigratable.length > 0) {
+      configurationProblems = await inspectStartupConfiguration(this.options.dshHome, profile, shellEnvironment, launchDirectory)
     }
     const blockingProblems = configurationProblems.filter(problem => problem.blocking !== false)
     if (blockingProblems.length > 0) {

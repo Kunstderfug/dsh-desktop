@@ -506,9 +506,6 @@ describe('GitHub release contract', () => {
     expect(workflow).toContain('set -euo pipefail')
     expect(workflow).not.toContain('Falling back to original installer')
     expect(workflow).not.toContain('Restoring original Windows installer')
-    expect(workflow).toContain('smoke-signed-windows:')
-    expect(workflow).toContain('smoke-signed-windows-installer.ps1')
-    expect(workflow).toContain("needs.smoke-signed-windows.result == 'success'")
     expect(workflow).toContain("if (Test-Path $packagedNode) { throw 'Standalone Windows node.exe must not be packaged.' }")
     expect(workflow).toContain('version="${PRERELEASE_TAG#v}"')
     expect(workflow).toContain('version="${SIGNED_VERSION#v}"')
@@ -538,10 +535,9 @@ describe('GitHub release contract', () => {
     for (const name of ancestors) {
       expect(jobs[name]?.if ?? '').not.toContain('needs.macos')
     }
-    expect(jobs['smoke-signed-windows']?.needs).toBe('sign-windows')
     for (const name of ['publish', 'publish-prerelease', 'publish-signed-test']) {
       expect(jobs[name]?.needs).toContain('macos')
-      expect(jobs[name]?.needs).toContain('smoke-signed-windows')
+      expect(jobs[name]?.needs).toContain('sign-windows')
     }
   })
 

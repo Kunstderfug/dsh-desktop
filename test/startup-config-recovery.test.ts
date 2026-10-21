@@ -79,7 +79,7 @@ describe('startup configuration recovery', () => {
     expect(shown[0]).toEqual(['Reveal Original File', 'Check Again', 'Back'])
   })
 
-  it('backs up and disables only the owning legacy preset without changing its implementation', async () => {
+  it('backs up and migrates legacy workflow-worker-thread to workflow-ptc without disabling the preset', async () => {
     const text = '- insert:\n    - id: preset-custom\n      name: "@deepseek-ai/dsh-agent-preset"\n      config:\n        plugins:\n          - id: workflow-worker-thread\n            name: "@deepseek-ai/dsh-workflow-worker-thread"\n    - id: preset-kept\n      name: "@deepseek-ai/dsh-agent-preset"\n'
     const path = await file('profiles/web/cordis.patch.yml', text)
     const [problem] = await inspectStartupConfiguration(home)
@@ -89,9 +89,12 @@ describe('startup configuration recovery', () => {
     const backup = await repairStartupConfig(home, problem)
     expect(await readFile(backup, 'utf8')).toBe(text)
     const fixed = parse(await readFile(path, 'utf8'))
-    expect(fixed[0].insert[0].disabled).toBe(true)
+    expect(fixed[0].insert[0].disabled).toBeUndefined()
     expect(fixed[0].insert[1].disabled).toBeUndefined()
-    expect(await readFile(path, 'utf8')).toContain('@deepseek-ai/dsh-workflow-worker-thread')
+    expect(fixed[0].insert[0].config.plugins[0].name).toBe('@deepseek-ai/dsh-workflow-ptc')
+    expect(fixed[0].insert[0].config.plugins[0].id).toBe('workflow-ptc')
+    expect(fixed[0].insert[0].config.plugins[0].config).toEqual({ provider: 'spawn' })
+    expect(await readFile(path, 'utf8')).not.toContain('@deepseek-ai/dsh-workflow-worker-thread')
     expect(await inspectStartupConfiguration(home)).toEqual([])
   })
 

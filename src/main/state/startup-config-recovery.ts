@@ -13,7 +13,7 @@ export interface StartupConfigProblem {
   source: string
   /** Safe descriptions contain field names, never configuration values. */
   detail: string
-  repair?: 'normalize' | 'reset-endpoint' | 'disable-legacy'
+  repair?: 'normalize' | 'reset-endpoint' | 'disable-legacy' | 'replace-legacy'
   manualOnly?: boolean
   blocking?: boolean
 }
@@ -117,10 +117,20 @@ function analyzeYaml(path: string, text: string, action?: StartupConfigProblem['
       if (name === LEGACY_WORKER) {
         const ownerId = isMap(owner) ? owner.get('id') : id
         problem('legacy-workflow', typeof ownerId === 'string' ? `${source}; owner=${ownerId}` : source,
-          'Removed workflow-worker-thread reference; disable this entry or its owning preset until migrated', 'disable-legacy')
-        if (action === 'disable-legacy') {
-          if (isMap(owner)) owner.set('disabled', true)
-          else node.set('disabled', true)
+          'Removed workflow-worker-thread reference; replace with workflow-ptc', 'replace-legacy')
+        if (action === 'replace-legacy' || action === 'disable-legacy') {
+          node.set('name', '@deepseek-ai/dsh-workflow-ptc')
+          if (node.get('id') === 'workflow-worker-thread') {
+            node.set('id', 'workflow-ptc')
+          }
+          const config = node.get('config', true)
+          if (isMap(config)) {
+            if (!config.has('provider')) config.set('provider', 'spawn')
+          } else {
+            node.set('config', { provider: 'spawn' })
+          }
+          if (isMap(owner) && owner.get('disabled') === true) owner.delete('disabled')
+          if (node.get('disabled') === true) node.delete('disabled')
           changed = true
         }
         return

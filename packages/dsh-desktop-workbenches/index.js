@@ -1,6 +1,7 @@
 import { readInstallEvidence } from './install-evidence.mjs'
 import Schema from '@deepseek-ai/schemastery'
 import { CatalogError, createCatalogReader } from './catalog.mjs'
+import { selectMarketFetch } from './market-fetch.mjs'
 import { awaitHandle, createMarketInstallStore, MarketInstallError, resolveInstallTarget } from './market-install.mjs'
 import { readSubmissionStatus, SubmissionStatusError } from './submission-status.mjs'
 import { createStateStore, MAX_STATE_BYTES, StateError } from './state.mjs'
@@ -64,6 +65,7 @@ async function readPayload(request, maximum = MAX_STATE_BYTES, tooLarge = 'Workb
 export function apply(ctx, config) {
   const store = createStateStore(config.root)
   const readCatalog = createCatalogReader({
+    fetch: selectMarketFetch(),
     cachePath: join(config.root, 'workbench-catalog-cache.json'),
     onWarning: error => ctx.logger?.warn?.(error)
   })

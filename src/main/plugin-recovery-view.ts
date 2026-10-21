@@ -91,11 +91,11 @@ export function describePluginFailure(
   const text = latestAttemptText(logs)
   if (text.includes('@deepseek-ai/dsh-workflow-worker-thread')) {
     return locale === 'zh' ? {
-      title: '插件或预设仍引用旧版工作流实现',
-      detail: '当前 Harness 已改用 workflow-ptc。请更新所属插件或停用旧预设；直接替换包名不能保证兼容。'
+      title: '插件引用了旧版工作流组件',
+      detail: '当前 Harness 已改用 workflow-ptc。请升级该插件以适配新版工作流引擎。'
     } : {
-      title: 'A plugin or preset references the removed workflow implementation',
-      detail: 'Current Harness uses workflow-ptc. Update the owning plugin or disable the old preset; renaming the package alone does not establish compatibility.'
+      title: 'A plugin references the removed workflow implementation',
+      detail: 'Current Harness uses workflow-ptc. Update the owning plugin to support the new workflow engine.'
     }
   }
   const duplicateRoute = text.match(/duplicate prefix route ["']([^"']+)["']/i)?.[1]

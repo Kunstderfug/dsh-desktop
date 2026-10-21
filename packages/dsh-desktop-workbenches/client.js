@@ -35,7 +35,7 @@ window.__ModuleLoader__.load({
       '正在更新目录…': 'Updating catalog…', '正在首次读取市场目录…': 'Loading the market catalog for the first time…', '市场目录暂不可用': 'Market catalog unavailable', '请重试读取目录，或使用已安装的工作台。': 'Retry loading the catalog, or use your installed workbenches.',
       '刷新目录': 'Refresh catalog', '正在检查更新': 'Checking for updates', '检查更新': 'Check for updates', '正在检查…': 'Checking…',
       '确认更新': 'Confirm update', '本机': 'On device', '市场': 'Market', '查看市场版本': 'View market version', '当前工作台来自本地开发。更新将改用市场发布的代码，本地修改不会带入新版本。请先备份安装目录中的重要文件。': 'This workbench is locally developed. Updating will use the market release code; local changes will not carry over. Back up important files in the installation directory first.', '检测到当前安装内容已被修改。更新将改用市场发布的代码，请先备份需要保留的修改。': 'The installed content has been modified. Updating will use the market release code. Back up any changes you want to keep first.', '需要确认更新本机工作台代码。': 'Confirm updating the installed workbench code.', '工作台集合': 'Workbench collections', '我的收藏': 'Favorites', '已安装': 'Installed', '搜索名称、作者或分类': 'Search name, author, or category', '搜索工作台': 'Search workbenches', '按分类筛选': 'Filter by category',
-      '全部': 'All', '其他': 'Other', '本地': 'Local', '排序': 'Sort', '工作台排序方式': 'Workbench sort order', '市场顺序': 'Market order', 'Star 数量': 'Stars', '下载量': 'Downloads', '更新时间': 'Recently updated', '名称': 'Name',
+      '全部': 'All', '其他': 'Other', '本地': 'Local', '排序': 'Sort', '工作台排序方式': 'Workbench sort order', '市场顺序': 'Market order', 'Star 数量': 'Stars', '下载量': 'Downloads', '更新时间': 'Recently updated', '名称': 'Name', '加载更多': 'Show more',
       '工作台功能已关闭': 'Workbenches are turned off', '可在 设置 → 通用 中重新开启。': 'Turn them on again in Settings → General.',
       '启用工作台功能': 'Enable workbenches', '开启后可使用工作台市场和已安装的工作台；关闭后所有工作台不加载，不影响已保存的会话和数据。': 'Browse the market and use installed workbenches when enabled. Turning this off does not affect saved sessions or data.',
       '工作台安装变更需要重启 Harness 后生效。已有会话和数据不受影响。 ': 'Restart Harness to apply workbench installation changes. Existing sessions and data are preserved. ',
@@ -1363,6 +1363,7 @@ window.__ModuleLoader__.load({
       .dshWbCard .dshWbMeta{padding:0;border:0;gap:12px}.dshWbCard .dshWbMetaItem{font-size:12px}.dshWbCard .dshWbAvatar{width:20px;height:20px}.dshWbCard .dshWbAuthor b{font-size:13px}.dshWbCard .dshWbMetaItem small{font-size:11px}
       .dshWbVersion{font-size:10px;color:var(--dsw-alias-label-secondary);white-space:nowrap}.dshWbPending{font-weight:600;color:var(--dsw-alias-label-primary)}
       .dshWbEmpty{grid-column:1/-1;display:flex;min-height:240px;align-items:center;justify-content:center;text-align:center;padding:32px;border:1px dashed var(--dsw-alias-border-l2);border-radius:14px;background:var(--dsw-alias-bg-module-platform)}.dshWbEmpty strong{display:block;font-size:15px;margin-bottom:5px}.dshWbEmpty p{margin:0}
+      .dshWbMoreContainer{display:flex;flex-direction:column;align-items:center;gap:8px;padding:24px 0 8px;margin:0 auto;width:100%}.dshWbMore{min-width:140px;height:36px;font-size:13px;font-weight:550;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-primary);cursor:pointer;transition:background .15s}.dshWbMore:hover{background:var(--dsw-alias-bg-layer-2)}.dshWbMoreCount{margin:0;font-size:12px;color:var(--dsw-alias-label-tertiary);line-height:18px}
       .dshWbDetail{padding:16px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;margin-bottom:16px;background:var(--dsw-alias-bg-layer-1)}
       .dshWbDetail h2{font-size:16px;line-height:24px;margin:0 auto 0 0}.dshWbDetail p{font-size:13px;line-height:21px;margin:10px 0 0}
       .dshWbCarousel{position:relative;margin:0 -4px;border-radius:10px;overflow:hidden;background:var(--dsw-alias-bg-module-platform);border:1px solid var(--dsw-alias-border-l2)}
@@ -1982,6 +1983,11 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
       const [submitCategory, setSubmitCategory] = React.useState('')
       const [categoryIdea, setCategoryIdea] = React.useState('')
       const [replacing, setReplacing] = React.useState(null)
+      const PAGE_SIZE = 24
+      const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE)
+      if (typeof React.useEffect === 'function') {
+        React.useEffect(() => { setVisibleCount(PAGE_SIZE) }, [tab, search, category, sortBy])
+      }
       const installMarket = (entry) => {
         const bundle = service.native.bundles[service.pluginFor(entry)]
         if ((entry.installed || (bundle && bundle.installed !== false) || service.installedVersionFor(entry)) && service.updateRiskFor(entry)) setReplacing({ entry, risk: service.updateRiskFor(entry) })
@@ -2017,10 +2023,12 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
       const categories = [{ id: 'all', name: tr('全部') }, ...[...new Set(allEntries.map(categoryKey))].map((id) => ({ id, name: id === 'local' ? tr('本地') : allEntries.find((entry) => categoryKey(entry) === id)?.category || tr('其他') }))]
       const query = search.toLowerCase().trim()
       const entries = sortMarketEntries(allEntries.filter((entry) => (category === 'all' || categoryKey(entry) === category) && `${entry.title || ''} ${entry.titleEn || ''} ${entry.name || ''} ${entry.description || ''} ${entry.descriptionEn || ''} ${entry.author || ''} ${entry.category || ''} ${entry.categoryNames?.zh || ''}`.toLowerCase().includes(query)), sortBy)
+      const displayedEntries = entries.slice(0, visibleCount)
+      const hasMore = visibleCount < entries.length
       const selected = (tab === 'mine' ? catalog.map(displayEntry) : allEntries).find((entry) => (entry.catalogId || entry.id) === detail)
       const removingEntry = allEntries.find((entry) => entry.id === removing) || localizedCatalog.find((entry) => entry.id === removing)
       const removingStale = removingEntry && service.staleRecordFor(removingEntry)
-      const selectCollection = (value) => { setTab(value); setCategory('all'); setDetail(null) }
+      const selectCollection = (value) => { setTab(value); setCategory('all'); setDetail(null); setVisibleCount(PAGE_SIZE) }
       const navigateCollections = (event) => {
         const values = ['market', 'favorites', 'mine']
         const current = values.indexOf(tab)
@@ -2042,7 +2050,7 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
         h('header', { className: 'dshWbMarketHeader', 'data-window-drag': true },
           h('div', { className: 'dshWbMarketHeaderText' },
             h('h1', null, tab === 'submit' ? tr('制作属于你的工作台') : tr('工作台')),
-            h('p', { className: 'dshWbMuted' }, tab === 'submit' ? tr('遵循规范开发、安装并验证，也可以准备材料提交到工作台市场。') : tr('有序组织专属界面、会话与资料')), tab !== 'submit' && h('label', { className: 'dshWbSearch' }, h(MarketIcon, { name: 'search' }), h('input', { type: 'search', placeholder: tr('搜索名称、作者或分类'), 'aria-label': tr('搜索工作台'), value: search, onChange: (event) => setSearch(event.target.value) }))),
+            h('p', { className: 'dshWbMuted' }, tab === 'submit' ? tr('遵循规范开发、安装并验证，也可以准备材料提交到工作台市场。') : tr('有序组织专属界面、会话与资料')), tab !== 'submit' && h('label', { className: 'dshWbSearch' }, h(MarketIcon, { name: 'search' }), h('input', { type: 'search', placeholder: tr('搜索名称、作者或分类'), 'aria-label': tr('搜索工作台'), value: search, onChange: (event) => { setSearch(event.target.value); setVisibleCount(PAGE_SIZE) } }))),
           h('div', { className: 'dshWbMarketHeaderActions' },
 
             h(Button, { primary: tab !== 'submit', className: `dshWbBtn${tab !== 'submit' ? ' dshWbPrimary' : ''} dshWbCreate`, onClick: () => { setTab(tab === 'submit' ? 'market' : 'submit'); setDetail(null); setCopyStatus(null) } }, h(MarketIcon, { name: tab === 'submit' ? 'search' : 'plus' }), tab === 'submit' ? tr('返回工作台市场') : tr('制作我的工作台')))),
@@ -2054,8 +2062,8 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
             h(Button, { id: 'dsh-workbench-mine-tab', role: 'tab', tabIndex: tab === 'mine' ? 0 : -1, 'aria-selected': tab === 'mine', 'aria-controls': 'dsh-workbench-mine-panel', onKeyDown: navigateCollections, onClick: () => selectCollection('mine') }, `${tr('已安装')} (${installedEntries.length})`))),
           h('div', { className: 'dshWbBrowseTools' },
             h('span', { className: 'dshWbRefreshHint' }, h(Button, { className: 'dshWbBtn dshWbRefresh', 'aria-describedby': 'dsh-workbench-refresh-tooltip', 'aria-label': checkingUpdates ? tr('正在检查更新') : tab === 'mine' ? tr('检查更新') : tr('刷新目录'), 'aria-busy': catalogRefreshing || checkingUpdates, disabled: catalogRefreshing || checkingUpdates, onClick: () => service.run(tab === 'mine' ? service.checkUpdates() : service.refreshCatalog()) }, h(MarketIcon, { name: 'refresh', size: 17 })), h('span', { id: 'dsh-workbench-refresh-tooltip', className: 'dshWbControlTooltip', role: 'tooltip' }, checkingUpdates ? tr('正在检查更新') : tab === 'mine' ? tr('检查更新') : tr('刷新目录'))),
-            h('label', { className: 'dshWbSort' }, h('select', { 'aria-label': tr('按分类筛选'), value: category, onChange: (event) => setCategory(event.target.value) }, categories.map((value) => h('option', { key: value.id, value: value.id }, value.id === 'all' ? tr('全部类型') : value.name)))),
-            h('label', { className: 'dshWbSort' }, h('select', { 'aria-label': tr('工作台排序方式'), value: sortBy, onChange: (event) => setSortBy(event.target.value) },
+            h('label', { className: 'dshWbSort' }, h('select', { 'aria-label': tr('按分类筛选'), value: category, onChange: (event) => { setCategory(event.target.value); setVisibleCount(PAGE_SIZE) } }, categories.map((value) => h('option', { key: value.id, value: value.id }, value.id === 'all' ? tr('全部类型') : value.name)))),
+            h('label', { className: 'dshWbSort' }, h('select', { 'aria-label': tr('工作台排序方式'), value: sortBy, onChange: (event) => { setSortBy(event.target.value); setVisibleCount(PAGE_SIZE) } },
               h('option', { value: 'stars' }, tr('Star 数量')),
               h('option', { value: 'downloads' }, tr('下载量')),
               h('option', { value: 'updated' }, tr('更新时间')),
@@ -2093,7 +2101,7 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
           h('p', { className: 'dshWbMuted dshWbSubmitOutcome' }, tr('提交 PR 就是进入审核，进度以 GitHub 上的 PR 为准，本机不保存投稿状态。PR 合并、市场目录更新后，工作台就会出现在工作台市场中。')),
           copyStatus && h(Toast, { key: copyStatus.id, text: copyStatus.text, tone: copyStatus.tone, holdMs: 2000, onDone: () => setCopyStatus((current) => current?.id === copyStatus.id ? null : current) })),
         tab !== 'submit' && h('section', { id: `dsh-workbench-${tab}-panel`, role: 'tabpanel', 'aria-labelledby': `dsh-workbench-${tab}-tab`, tabIndex: 0 },
-          h('div', { className: 'dshWbGrid', 'data-tab': tab }, entries.map((entry) => {
+          h('div', { className: 'dshWbGrid', 'data-tab': tab }, displayedEntries.map((entry) => {
             const catalogId = entry.catalogId || entry.id
             const isFavorite = favorites.includes(catalogId)
             const pluginName = service.pluginFor(entry)
@@ -2159,7 +2167,10 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
                         : entry.listed === true && entry.repository && h('a', { className: 'dshWbBtn dshWbPrimary', href: entry.repository, target: '_blank', rel: 'noopener noreferrer' }, tr('查看安装说明'))))))
           }), entries.length === 0 && (tab !== 'market' || (ready && !catalogRefreshing) || catalogLoaded) && h('div', { className: 'dshWbEmpty' }, h('div', null,
             h('strong', null, tab === 'market' && !catalogLoaded && catalogError ? tr('市场目录暂不可用') : tab === 'favorites' && !search ? tr('还没有收藏工作台') : tab === 'mine' && !search ? tr('还没有安装工作台') : tr('没有找到匹配的工作台')),
-            h('p', { className: 'dshWbMuted' }, tab === 'market' && !catalogLoaded && catalogError ? tr('请重试读取目录，或使用已安装的工作台。') : tab === 'favorites' && !search ? tr('把鼠标移到市场卡片上，点击书签即可收藏。') : tab === 'mine' && !search ? tr('到工作台市场选择一个工作台开始。') : tr('试试其他关键词或分类。')))))),
+            h('p', { className: 'dshWbMuted' }, tab === 'market' && !catalogLoaded && catalogError ? tr('请重试读取目录，或使用已安装的工作台。') : tab === 'favorites' && !search ? tr('把鼠标移到市场卡片上，点击书签即可收藏。') : tab === 'mine' && !search ? tr('到工作台市场选择一个工作台开始。') : tr('试试其他关键词或分类。'))))),
+          hasMore && h('div', { className: 'dshWbMoreContainer' },
+            h(Button, { className: 'dshWbBtn dshWbMore', onClick: () => setVisibleCount((current) => current + PAGE_SIZE) }, tr('加载更多')),
+            h('p', { className: 'dshWbMoreCount' }, isEnglish() ? `Showing ${displayedEntries.length} of ${entries.length}` : `已显示 ${displayedEntries.length} / 共 ${entries.length} 个工作台`))),
         replacing && h(ConfirmMarketUpdate, { entry: replacing.entry, risk: replacing.risk, disabled: !!installing, onCancel: () => setReplacing(null), onConfirm: () => { service.run(service.installFromMarket(replacing.entry.catalogId || replacing.entry.id, { confirmedReplacement: true })); setReplacing(null) } }),
         detail != null && h(DetailModal, { entry: selected, onClose: () => setDetail(null) }),
         removing != null && h(ConfirmRemoveModal, { entry: removingEntry, disabled: disabled || !!installing || !!removingPlugin, onCancel: () => setRemoving(null), uninstall: !removingStale && !removingEntry?.unavailable && !!service.marketInstallFor(removing), nativeUninstall: !removingStale && !removingEntry?.unavailable && !service.marketInstallFor(removing), recordOnly: !!removingStale || !!removingEntry?.unavailable, onConfirm: () => service.run((removingEntry?.unavailable ? service.clearUnavailableRecord(removing) : removingStale ? service.removeStaleWorkbenchRecord(removing) : service.removeWorkbench(removing)).then(() => setRemoving(null))) }))
